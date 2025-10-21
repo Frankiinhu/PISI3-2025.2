@@ -290,6 +290,245 @@ class DiseaseClusterer:
             
         X_scaled = self.scaler.transform(X)
         return self.model.predict(X_scaled)
+    
+    def compare_clustering_methods(self, X: np.ndarray, n_clusters=3) -> pd.DataFrame:
+        """
+        Compara diferentes métodos de clusterização
+        
+        Args:
+            X: Dados para clusterização
+            n_clusters: Número de clusters (para métodos que exigem)
+            
+        Returns:
+            DataFrame com métricas comparativas
+        """
+        import time
+        
+        methods = {
+            'K-Means': KMeans(n_clusters=n_clusters, random_state=self.random_state, n_init=10),
+            'K-Means++': KMeans(n_clusters=n_clusters, init='k-means++', random_state=self.random_state, n_init=10),
+            'DBSCAN (eps=0.5)': DBSCAN(eps=0.5, min_samples=5),
+            'DBSCAN (eps=1.0)': DBSCAN(eps=1.0, min_samples=5),
+            'Hierarchical (Ward)': AgglomerativeClustering(n_clusters=n_clusters, linkage='ward'),
+            'Hierarchical (Complete)': AgglomerativeClustering(n_clusters=n_clusters, linkage='complete'),
+            'Hierarchical (Average)': AgglomerativeClustering(n_clusters=n_clusters, linkage='average')
+        }
+        
+        results = []
+        
+        for name, model in methods.items():
+            logger.info(f"Testando {name}...")
+            start_time = time.time()
+            
+            try:
+                # Treinar
+                if hasattr(model, 'fit_predict'):
+                    labels = model.fit_predict(X)
+                else:
+                    model.fit(X)
+                    labels = model.labels_
+                
+                training_time = time.time() - start_time
+                
+                # Remover pontos de ruído para DBSCAN
+                mask = labels != -1
+                X_filtered = X[mask]
+                labels_filtered = labels[mask]
+                
+                n_clusters_found = len(set(labels)) - (1 if -1 in labels else 0)
+                n_noise = list(labels).count(-1)
+                
+                # Calcular métricas (apenas se tiver pelo menos 2 clusters)
+                if len(set(labels_filtered)) > 1:
+                    silhouette = silhouette_score(X_filtered, labels_filtered)
+                    davies_bouldin = davies_bouldin_score(X_filtered, labels_filtered)
+                    calinski = calinski_harabasz_score(X_filtered, labels_filtered)
+                else:
+                    silhouette = davies_bouldin = calinski = np.nan
+                
+                results.append({
+                    'Método': name,
+                    'N_Clusters': n_clusters_found,
+                    'Ruído': n_noise,
+                    'Silhouette': silhouette,
+                    'Davies-Bouldin': davies_bouldin,
+                    'Calinski-Harabasz': calinski,
+                    'Tempo (s)': training_time
+                })
+                
+            except Exception as e:
+                logger.warning(f"Erro ao treinar {name}: {e}")
+                results.append({
+                    'Método': name,
+                    'N_Clusters': np.nan,
+                    'Ruído': np.nan,
+                    'Silhouette': np.nan,
+                    'Davies-Bouldin': np.nan,
+                    'Calinski-Harabasz': np.nan,
+                    'Tempo (s)': np.nan
+                })
+        
+        results_df = pd.DataFrame(results)
+        
+        # Ordenar por Silhouette Score (maior é melhor)
+        results_df_sorted = results_df.sort_values('Silhouette', ascending=False, na_position='last')
+        
+        logger.info("\n=== COMPARAÇÃO DE MÉTODOS DE CLUSTERIZAÇÃO ===")
+        logger.info(f"\n{results_df_sorted.to_string()}")
+        
+        return results_df_sorted
+    
+    def reduce_dimensions_tsne(self, X: np.ndarray, n_components=2, perplexity=30) -> np.ndarray:
+        """
+        Reduz dimensionalidade usando t-SNE para visualização
+        (Melhor que PCA para visualização de clusters)
+        
+        Args:
+            X: Dados para redução
+            n_components: Número de componentes (2 ou 3)
+            perplexity: Perplexidade do t-SNE (5-50 recomendado)
+            
+        Returns:
+            Array com dados reduzidos
+        """
+        from sklearn.manifold import TSNE
+        
+        tsne = TSNE(
+            n_components=n_components,
+            perplexity=perplexity,
+            random_state=self.random_state,
+            n_iter=1000
+        )
+        
+        X_reduced = tsne.fit_transform(X)
+        
+        logger.info(f"t-SNE: Redução para {n_components}D concluída")
+        
+        return X_reduced
+    
+    def calculate_gap_statistic(self, X: np.ndarray, max_clusters=10, n_refs=10) -> Dict:
+        """
+        Calcula Gap Statistic para determinar número ótimo de clusters
+        (Método estatístico mais robusto que o Elbow)
+        
+        Args:
+            X: Dados para clusterização
+            max_clusters: Número máximo de clusters a testar
+            n_refs: Número de datasets de referência
+            
+        Returns:
+            Dicionário com Gap Statistics
+        """
+        gaps = []
+        std_gaps = []
+        k_range = range(1, max_clusters + 1)
+        
+        for k in k_range:
+            # Clusterização nos dados reais
+            kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init=10)
+            kmeans.fit(X)
+            real_dispersion = np.log(kmeans.inertia_)
+            
+            # Clusterização em dados de referência (uniformes)
+            ref_dispersions = []
+            for _ in range(n_refs):
+                # Gerar dados de referência uniformes
+                random_data = np.random.uniform(
+                    X.min(axis=0),
+                    X.max(axis=0),
+                    size=X.shape
+                )
+                
+                kmeans_ref = KMeans(n_clusters=k, random_state=self.random_state, n_init=10)
+                kmeans_ref.fit(random_data)
+                ref_dispersions.append(np.log(kmeans_ref.inertia_))
+            
+            # Calcular Gap
+            ref_dispersion_mean = np.mean(ref_dispersions)
+            gap = ref_dispersion_mean - real_dispersion
+            
+            # Calcular desvio padrão
+            sdk = np.std(ref_dispersions)
+            sk = sdk * np.sqrt(1 + 1/n_refs)
+            
+            gaps.append(gap)
+            std_gaps.append(sk)
+        
+        # Encontrar k ótimo (primeiro k onde gap(k) >= gap(k+1) - std(k+1))
+        optimal_k = 1
+        for i in range(len(gaps) - 1):
+            if gaps[i] >= gaps[i+1] - std_gaps[i+1]:
+                optimal_k = k_range[i]
+                break
+        
+        logger.info(f"Gap Statistic - Número ótimo de clusters: {optimal_k}")
+        
+        return {
+            'k_values': list(k_range),
+            'gaps': gaps,
+            'std_gaps': std_gaps,
+            'optimal_k': optimal_k
+        }
+    
+    def describe_cluster_clinically(self, df: pd.DataFrame, cluster_id: int) -> str:
+        """
+        Gera descrição clínica textual de um cluster
+        
+        Args:
+            df: DataFrame original com dados
+            cluster_id: ID do cluster para descrever
+            
+        Returns:
+            String com descrição clínica do cluster
+        """
+        if self.labels_ is None:
+            raise ValueError("Modelo não treinado.")
+        
+        df_with_clusters = df.copy()
+        df_with_clusters['Cluster'] = self.labels_
+        
+        cluster_data = df_with_clusters[df_with_clusters['Cluster'] == cluster_id]
+        
+        # Estatísticas do cluster
+        n_patients = len(cluster_data)
+        pct_total = (n_patients / len(df)) * 100
+        
+        # Diagnósticos mais comuns (se disponível)
+        diagnosis_dist = ""
+        if 'Diagnóstico' in cluster_data.columns:
+            top_diagnosis = cluster_data['Diagnóstico'].value_counts().head(3)
+            diagnosis_dist = "\n  Diagnósticos principais:\n"
+            for diag, count in top_diagnosis.items():
+                diagnosis_dist += f"    - {diag}: {count} casos ({count/n_patients*100:.1f}%)\n"
+        
+        # Variáveis numéricas principais
+        numeric_cols = cluster_data.select_dtypes(include=[np.number]).columns
+        top_vars = []
+        
+        for col in numeric_cols:
+            cluster_mean = cluster_data[col].mean()
+            overall_mean = df[col].mean()
+            diff_pct = ((cluster_mean - overall_mean) / overall_mean * 100) if overall_mean != 0 else 0
+            
+            if abs(diff_pct) > 20:  # Diferença significativa
+                direction = "elevado" if diff_pct > 0 else "reduzido"
+                top_vars.append(f"    - {col}: {direction} em {abs(diff_pct):.1f}% vs média geral")
+        
+        characteristics = "\n".join(top_vars[:5]) if top_vars else "    - Sem características distintivas"
+        
+        description = f"""
+=== PERFIL CLÍNICO DO CLUSTER {cluster_id} ===
+
+Tamanho: {n_patients} pacientes ({pct_total:.1f}% do total)
+{diagnosis_dist}
+Características distintivas:
+{characteristics}
+
+Interpretação: Este cluster representa um subgrupo de pacientes com perfil 
+{"clínico diferenciado" if len(top_vars) > 0 else "similar à população geral"}.
+"""
+        
+        return description
         
     def save_model(self, filepath: str) -> None:
         """
