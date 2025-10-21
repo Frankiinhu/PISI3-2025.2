@@ -1,5 +1,5 @@
 """
-Dashboard Principal - VitaNimbus (Versão Completa com Callbacks)
+Dashboard Principal - Nimbusvita (Versão Completa com Callbacks)
 Análise Exploratória de Dados e Predição de Doenças Relacionadas ao Clima
 """
 import dash
@@ -68,59 +68,321 @@ def load_data_and_models():
 
 # Inicializar app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
-app.title = "VitaNimbus - Análise de Doenças Climáticas"
+app.title = "Nimbusvita - Análise de Doenças Climáticas"
 
-# Cores e estilo
+# CSS customizado para melhorar a aparência
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Inter', 'Segoe UI', sans-serif;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+            
+            /* Animações suaves */
+            .stat-card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important;
+            }
+            
+            .card-hover:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 12px 48px rgba(102, 126, 234, 0.3) !important;
+            }
+            
+            /* Estilo para inputs */
+            input[type="number"] {
+                background-color: rgba(255,255,255,0.05) !important;
+                border: 1px solid #2d3250 !important;
+                color: #e8eaf6 !important;
+                transition: all 0.3s ease;
+            }
+            
+            input[type="number"]:focus {
+                border-color: #667eea !important;
+                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+                outline: none;
+            }
+            
+            /* Estilo para checkboxes */
+            input[type="checkbox"] {
+                accent-color: #667eea;
+            }
+            
+            /* Animação do botão */
+            button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 15px 40px rgba(102, 126, 234, 0.6) !important;
+            }
+            
+            button:active {
+                transform: translateY(0);
+            }
+            
+            /* Scrollbar customizada */
+            ::-webkit-scrollbar {
+                width: 10px;
+            }
+            
+            ::-webkit-scrollbar-track {
+                background: #0a0e27;
+            }
+            
+            ::-webkit-scrollbar-thumb {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 5px;
+            }
+            
+            ::-webkit-scrollbar-thumb:hover {
+                background: linear-gradient(135deg, #764ba2 0%, #f093fb 100%);
+            }
+            
+            /* Dropdown styles */
+            .Select-control {
+                background-color: rgba(255,255,255,0.05) !important;
+                border-color: #2d3250 !important;
+            }
+            
+            .Select-menu-outer {
+                background-color: #1e2139 !important;
+                border: 1px solid #2d3250 !important;
+            }
+            
+            .Select-option {
+                background-color: #1e2139 !important;
+                color: #e8eaf6 !important;
+            }
+            
+            .Select-option:hover {
+                background-color: #252a48 !important;
+            }
+            
+            /* Tabs animation */
+            ._dash-undo-redo {
+                display: none;
+            }
+            
+            .tab {
+                transition: all 0.3s ease;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
+
+# Cores e estilo - Tema moderno e profissional
 COLORS = {
-    'background': '#0f1419',
-    'primary': '#1DA1F2',
-    'secondary': '#14171A',
-    'text': '#E1E8ED',
-    'accent': '#00C9A7',
-    'card': '#192734'
+    'background': '#0a0e27',
+    'background_light': '#1a1f3a',
+    'primary': '#667eea',
+    'primary_light': '#764ba2',
+    'secondary': '#131829',
+    'text': '#e8eaf6',
+    'text_secondary': '#9fa8da',
+    'accent': '#f093fb',
+    'accent_secondary': '#4facfe',
+    'card': '#1e2139',
+    'card_hover': '#252a48',
+    'success': '#4ade80',
+    'warning': '#fbbf24',
+    'error': '#f87171',
+    'border': '#2d3250'
 }
 
 # Layout principal
-app.layout = html.Div(style={'backgroundColor': COLORS['background'], 'minHeight': '100vh', 'fontFamily': 'Arial, sans-serif'}, children=[
-    # Header
+app.layout = html.Div(style={
+    'backgroundColor': COLORS['background'], 
+    'minHeight': '100vh', 
+    'fontFamily': "'Inter', 'Segoe UI', 'Roboto', sans-serif",
+    'background': f'linear-gradient(135deg, {COLORS["background"]} 0%, {COLORS["background_light"]} 100%)'
+}, children=[
+    # Header com gradiente
     html.Div(className='header', style={
-        'backgroundColor': COLORS['secondary'],
-        'padding': '20px',
-        'marginBottom': '20px',
-        'boxShadow': '0 2px 4px rgba(0,0,0,0.3)'
+        'background': f'linear-gradient(135deg, {COLORS["primary"]} 0%, {COLORS["primary_light"]} 100%)',
+        'padding': '30px 20px',
+        'marginBottom': '30px',
+        'boxShadow': '0 10px 30px rgba(0,0,0,0.5)',
+        'borderBottom': f'3px solid {COLORS["accent"]}'
     }, children=[
-        html.H1('🌡️ VitaNimbus - Weather Related Disease Prediction', 
-                style={'color': COLORS['primary'], 'textAlign': 'center', 'margin': '0', 'fontSize': '2.5em'}),
-        html.P('Análise Exploratória de Dados e Predição de Doenças Relacionadas ao Clima',
-               style={'color': COLORS['text'], 'textAlign': 'center', 'margin': '10px 0 0 0', 'fontSize': '1.1em'})
+        html.Div(style={'maxWidth': '1400px', 'margin': '0 auto'}, children=[
+            html.H1('Nimbusvita', 
+                    style={
+                        'color': 'white', 
+                        'textAlign': 'center', 
+                        'margin': '0', 
+                        'fontSize': '3em',
+                        'fontWeight': '700',
+                        'letterSpacing': '1px',
+                        'textShadow': '2px 2px 4px rgba(0,0,0,0.3)'
+                    }),
+            html.P('Weather Related Disease Prediction',
+                   style={
+                       'color': 'rgba(255,255,255,0.95)', 
+                       'textAlign': 'center', 
+                       'margin': '10px 0 5px 0', 
+                       'fontSize': '1.3em',
+                       'fontWeight': '500'
+                   }),
+            html.P('Análise Exploratória de Dados e Predição de Doenças Relacionadas ao Clima',
+                   style={
+                       'color': 'rgba(255,255,255,0.85)', 
+                       'textAlign': 'center', 
+                       'margin': '5px 0 0 0', 
+                       'fontSize': '0.95em',
+                       'fontWeight': '400'
+                   })
+        ])
     ]),
     
-    # Tabs de navegação
-    dcc.Tabs(id='tabs', value='tab-overview', style={
-        'backgroundColor': COLORS['secondary']
-    }, children=[
-        dcc.Tab(label='📊 Visão Geral', value='tab-overview', 
-                style={'color': COLORS['text'], 'backgroundColor': COLORS['secondary']},
-                selected_style={'color': COLORS['primary'], 'backgroundColor': COLORS['card'], 'fontWeight': 'bold'}),
-        dcc.Tab(label='🔍 Análise Exploratória', value='tab-eda', 
-                style={'color': COLORS['text'], 'backgroundColor': COLORS['secondary']},
-                selected_style={'color': COLORS['primary'], 'backgroundColor': COLORS['card'], 'fontWeight': 'bold'}),
-        dcc.Tab(label='🌡️ Clima vs Diagnóstico', value='tab-climate', 
-                style={'color': COLORS['text'], 'backgroundColor': COLORS['secondary']},
-                selected_style={'color': COLORS['primary'], 'backgroundColor': COLORS['card'], 'fontWeight': 'bold'}),
-        dcc.Tab(label='💊 Sintomas', value='tab-symptoms', 
-                style={'color': COLORS['text'], 'backgroundColor': COLORS['secondary']},
-                selected_style={'color': COLORS['primary'], 'backgroundColor': COLORS['card'], 'fontWeight': 'bold'}),
-        dcc.Tab(label='🤖 Modelos ML', value='tab-ml', 
-                style={'color': COLORS['text'], 'backgroundColor': COLORS['secondary']},
-                selected_style={'color': COLORS['primary'], 'backgroundColor': COLORS['card'], 'fontWeight': 'bold'}),
-        dcc.Tab(label='🎯 Predição', value='tab-prediction', 
-                style={'color': COLORS['text'], 'backgroundColor': COLORS['secondary']},
-                selected_style={'color': COLORS['primary'], 'backgroundColor': COLORS['card'], 'fontWeight': 'bold'}),
-    ]),
-    
-    # Conteúdo das tabs
-    html.Div(id='tabs-content', style={'padding': '20px'})
+    # Container para tabs
+    html.Div(style={'maxWidth': '1400px', 'margin': '0 auto', 'padding': '0 20px'}, children=[
+        # Tabs de navegação com estilo moderno
+        dcc.Tabs(id='tabs', value='tab-overview', style={
+            'backgroundColor': 'transparent',
+            'borderBottom': f'2px solid {COLORS["border"]}'
+        }, children=[
+            dcc.Tab(label='Visão Geral', value='tab-overview', 
+                    style={
+                        'color': COLORS['text_secondary'], 
+                        'backgroundColor': 'transparent',
+                        'border': 'none',
+                        'padding': '15px 30px',
+                        'fontSize': '1em',
+                        'fontWeight': '500',
+                        'transition': 'all 0.3s ease'
+                    },
+                    selected_style={
+                        'color': COLORS['accent'], 
+                        'backgroundColor': COLORS['card'], 
+                        'fontWeight': '600',
+                        'borderTop': f'3px solid {COLORS["accent"]}',
+                        'borderLeft': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderRadius': '8px 8px 0 0'
+                    }),
+            dcc.Tab(label='Análise Exploratória', value='tab-eda', 
+                    style={
+                        'color': COLORS['text_secondary'], 
+                        'backgroundColor': 'transparent',
+                        'border': 'none',
+                        'padding': '15px 30px',
+                        'fontSize': '1em',
+                        'fontWeight': '500'
+                    },
+                    selected_style={
+                        'color': COLORS['accent'], 
+                        'backgroundColor': COLORS['card'], 
+                        'fontWeight': '600',
+                        'borderTop': f'3px solid {COLORS["accent"]}',
+                        'borderLeft': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderRadius': '8px 8px 0 0'
+                    }),
+            dcc.Tab(label='Clima vs Diagnóstico', value='tab-climate', 
+                    style={
+                        'color': COLORS['text_secondary'], 
+                        'backgroundColor': 'transparent',
+                        'border': 'none',
+                        'padding': '15px 30px',
+                        'fontSize': '1em',
+                        'fontWeight': '500'
+                    },
+                    selected_style={
+                        'color': COLORS['accent'], 
+                        'backgroundColor': COLORS['card'], 
+                        'fontWeight': '600',
+                        'borderTop': f'3px solid {COLORS["accent"]}',
+                        'borderLeft': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderRadius': '8px 8px 0 0'
+                    }),
+            dcc.Tab(label='Sintomas', value='tab-symptoms', 
+                    style={
+                        'color': COLORS['text_secondary'], 
+                        'backgroundColor': 'transparent',
+                        'border': 'none',
+                        'padding': '15px 30px',
+                        'fontSize': '1em',
+                        'fontWeight': '500'
+                    },
+                    selected_style={
+                        'color': COLORS['accent'], 
+                        'backgroundColor': COLORS['card'], 
+                        'fontWeight': '600',
+                        'borderTop': f'3px solid {COLORS["accent"]}',
+                        'borderLeft': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderRadius': '8px 8px 0 0'
+                    }),
+            dcc.Tab(label='Modelos ML', value='tab-ml', 
+                    style={
+                        'color': COLORS['text_secondary'], 
+                        'backgroundColor': 'transparent',
+                        'border': 'none',
+                        'padding': '15px 30px',
+                        'fontSize': '1em',
+                        'fontWeight': '500'
+                    },
+                    selected_style={
+                        'color': COLORS['accent'], 
+                        'backgroundColor': COLORS['card'], 
+                        'fontWeight': '600',
+                        'borderTop': f'3px solid {COLORS["accent"]}',
+                        'borderLeft': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderRadius': '8px 8px 0 0'
+                    }),
+            dcc.Tab(label='Predição', value='tab-prediction', 
+                    style={
+                        'color': COLORS['text_secondary'], 
+                        'backgroundColor': 'transparent',
+                        'border': 'none',
+                        'padding': '15px 30px',
+                        'fontSize': '1em',
+                        'fontWeight': '500'
+                    },
+                    selected_style={
+                        'color': COLORS['accent'], 
+                        'backgroundColor': COLORS['card'], 
+                        'fontWeight': '600',
+                        'borderTop': f'3px solid {COLORS["accent"]}',
+                        'borderLeft': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderRadius': '8px 8px 0 0'
+                    }),
+        ]),
+        
+        # Conteúdo das tabs
+        html.Div(id='tabs-content', style={'padding': '30px 0'})
+    ])
 ])
 
 
@@ -145,21 +407,37 @@ def render_content(tab):
 
 
 def create_card(children, title=None):
-    """Cria um card estilizado"""
+    """Cria um card estilizado com design moderno"""
     content = []
     if title:
-        content.append(html.H3(title, style={'color': COLORS['primary'], 'marginBottom': '15px'}))
+        content.append(html.H3(title, style={
+            'color': COLORS['text'], 
+            'marginBottom': '20px',
+            'fontSize': '1.3em',
+            'fontWeight': '600',
+            'borderBottom': f'2px solid {COLORS["accent"]}',
+            'paddingBottom': '10px',
+            'background': f'linear-gradient(90deg, {COLORS["accent"]} 0%, transparent 100%)',
+            'WebkitBackgroundClip': 'text',
+            'WebkitTextFillColor': 'transparent',
+            'backgroundClip': 'text'
+        }))
     content.extend(children if isinstance(children, list) else [children])
     
     return html.Div(
         content,
         style={
             'backgroundColor': COLORS['card'],
-            'padding': '20px',
-            'borderRadius': '10px',
-            'marginBottom': '20px',
-            'boxShadow': '0 2px 8px rgba(0,0,0,0.3)'
-        }
+            'padding': '25px',
+            'borderRadius': '15px',
+            'marginBottom': '25px',
+            'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
+            'border': f'1px solid {COLORS["border"]}',
+            'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
+            'position': 'relative',
+            'overflow': 'hidden'
+        },
+        className='card-hover'
     )
 
 
@@ -167,43 +445,150 @@ def create_overview_layout():
     """Layout da visão geral"""
     info = eda_global.basic_info()
     
-    # Estatísticas básicas
+    # Estatísticas básicas com design moderno
     stats_cards = html.Div([
         html.Div([
             html.Div([
-                html.H4('📋 Total de Registros', style={'color': COLORS['text'], 'margin': '0'}),
-                html.H2(f"{info['shape'][0]:,}", style={'color': COLORS['accent'], 'margin': '10px 0'}),
-            ], style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px', 
-                     'textAlign': 'center', 'boxShadow': '0 2px 8px rgba(0,0,0,0.3)'}),
-        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px'}),
+                html.Div([
+                    html.Div('📊', style={'fontSize': '2.5em', 'marginBottom': '10px'}),
+                    html.H4('Total de Registros', style={
+                        'color': COLORS['text_secondary'], 
+                        'margin': '0', 
+                        'fontSize': '0.9em',
+                        'fontWeight': '500',
+                        'textTransform': 'uppercase',
+                        'letterSpacing': '0.5px'
+                    }),
+                    html.H2(f"{info['shape'][0]:,}", style={
+                        'color': COLORS['accent'], 
+                        'margin': '15px 0 0 0',
+                        'fontSize': '2.5em',
+                        'fontWeight': '700',
+                        'background': f'linear-gradient(135deg, {COLORS["accent"]} 0%, {COLORS["accent_secondary"]} 100%)',
+                        'WebkitBackgroundClip': 'text',
+                        'WebkitTextFillColor': 'transparent'
+                    }),
+                ], style={
+                    'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
+                    'padding': '30px 20px', 
+                    'borderRadius': '15px', 
+                    'textAlign': 'center', 
+                    'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
+                    'border': f'1px solid {COLORS["border"]}',
+                    'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
+                    'cursor': 'pointer'
+                })
+            ], style={'width': '100%'}, className='stat-card'),
+        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
         
         html.Div([
             html.Div([
-                html.H4('🏥 Diagnósticos Únicos', style={'color': COLORS['text'], 'margin': '0'}),
-                html.H2(f"{df_global['Diagnóstico'].nunique()}", style={'color': COLORS['accent'], 'margin': '10px 0'}),
-            ], style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px',
-                     'textAlign': 'center', 'boxShadow': '0 2px 8px rgba(0,0,0,0.3)'}),
-        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px'}),
+                html.Div([
+                    html.Div('🏥', style={'fontSize': '2.5em', 'marginBottom': '10px'}),
+                    html.H4('Diagnósticos Únicos', style={
+                        'color': COLORS['text_secondary'], 
+                        'margin': '0', 
+                        'fontSize': '0.9em',
+                        'fontWeight': '500',
+                        'textTransform': 'uppercase',
+                        'letterSpacing': '0.5px'
+                    }),
+                    html.H2(f"{df_global['Diagnóstico'].nunique()}", style={
+                        'color': COLORS['success'], 
+                        'margin': '15px 0 0 0',
+                        'fontSize': '2.5em',
+                        'fontWeight': '700'
+                    }),
+                ], style={
+                    'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
+                    'padding': '30px 20px', 
+                    'borderRadius': '15px',
+                    'textAlign': 'center', 
+                    'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
+                    'border': f'1px solid {COLORS["border"]}',
+                    'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
+                    'cursor': 'pointer'
+                })
+            ], style={'width': '100%'}, className='stat-card'),
+        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
         
         html.Div([
             html.Div([
-                html.H4('📊 Total de Features', style={'color': COLORS['text'], 'margin': '0'}),
-                html.H2(f"{info['shape'][1]}", style={'color': COLORS['accent'], 'margin': '10px 0'}),
-            ], style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px',
-                     'textAlign': 'center', 'boxShadow': '0 2px 8px rgba(0,0,0,0.3)'}),
-        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px'}),
+                html.Div([
+                    html.Div('📈', style={'fontSize': '2.5em', 'marginBottom': '10px'}),
+                    html.H4('Total de Features', style={
+                        'color': COLORS['text_secondary'], 
+                        'margin': '0', 
+                        'fontSize': '0.9em',
+                        'fontWeight': '500',
+                        'textTransform': 'uppercase',
+                        'letterSpacing': '0.5px'
+                    }),
+                    html.H2(f"{info['shape'][1]}", style={
+                        'color': COLORS['primary'], 
+                        'margin': '15px 0 0 0',
+                        'fontSize': '2.5em',
+                        'fontWeight': '700'
+                    }),
+                ], style={
+                    'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
+                    'padding': '30px 20px', 
+                    'borderRadius': '15px',
+                    'textAlign': 'center', 
+                    'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
+                    'border': f'1px solid {COLORS["border"]}',
+                    'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
+                    'cursor': 'pointer'
+                })
+            ], style={'width': '100%'}, className='stat-card'),
+        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
         
         html.Div([
             html.Div([
-                html.H4('🔬 Sintomas Analisados', style={'color': COLORS['text'], 'margin': '0'}),
-                html.H2(f"{len(symptom_cols)}", style={'color': COLORS['accent'], 'margin': '10px 0'}),
-            ], style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px',
-                     'textAlign': 'center', 'boxShadow': '0 2px 8px rgba(0,0,0,0.3)'}),
-        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px'}),
-    ])
+                html.Div([
+                    html.Div('🔬', style={'fontSize': '2.5em', 'marginBottom': '10px'}),
+                    html.H4('Sintomas Analisados', style={
+                        'color': COLORS['text_secondary'], 
+                        'margin': '0', 
+                        'fontSize': '0.9em',
+                        'fontWeight': '500',
+                        'textTransform': 'uppercase',
+                        'letterSpacing': '0.5px'
+                    }),
+                    html.H2(f"{len(symptom_cols)}", style={
+                        'color': COLORS['warning'], 
+                        'margin': '15px 0 0 0',
+                        'fontSize': '2.5em',
+                        'fontWeight': '700'
+                    }),
+                ], style={
+                    'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
+                    'padding': '30px 20px', 
+                    'borderRadius': '15px',
+                    'textAlign': 'center', 
+                    'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
+                    'border': f'1px solid {COLORS["border"]}',
+                    'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
+                    'cursor': 'pointer'
+                })
+            ], style={'width': '100%'}, className='stat-card'),
+        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
+    ], style={'marginBottom': '30px'})
     
     return html.Div([
-        html.H2('📊 Visão Geral do Dataset', style={'color': COLORS['primary'], 'marginBottom': '20px'}),
+        html.Div([
+            html.H2('Visão Geral do Dataset', style={
+                'color': COLORS['text'], 
+                'marginBottom': '10px',
+                'fontSize': '2em',
+                'fontWeight': '700'
+            }),
+            html.P('Estatísticas e distribuições principais do conjunto de dados', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '1em',
+                'marginBottom': '30px'
+            })
+        ]),
         
         stats_cards,
         
@@ -245,11 +630,17 @@ def update_diagnosis_count(tab):
     
     fig.update_layout(
         plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
+        paper_bgcolor='rgba(0,0,0,0)',
         font_color=COLORS['text'],
         xaxis_title='Diagnóstico',
         yaxis_title='Número de Casos',
-        showlegend=False
+        showlegend=False,
+        xaxis_tickangle=-45,
+        font=dict(family="Inter, sans-serif", size=12),
+        title_font=dict(size=16, color=COLORS['text']),
+        xaxis=dict(gridcolor=COLORS['border'], showgrid=True),
+        yaxis=dict(gridcolor=COLORS['border'], showgrid=True),
+        margin=dict(t=30, b=80, l=60, r=30)
     )
     
     return fig
@@ -320,21 +711,49 @@ def update_climate_distribution(tab):
 def create_eda_layout():
     """Layout da análise exploratória"""
     return html.Div([
-        html.H2('🔍 Análise Exploratória de Dados', style={'color': COLORS['primary'], 'marginBottom': '20px'}),
+        html.Div([
+            html.H2('Análise Exploratória de Dados', style={
+                'color': COLORS['text'], 
+                'marginBottom': '10px',
+                'fontSize': '2em',
+                'fontWeight': '700'
+            }),
+            html.P('Explore correlações e padrões nos dados através de visualizações interativas', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '1em',
+                'marginBottom': '30px'
+            })
+        ]),
         
         html.Div([
             html.Label('Selecione Sintomas para Análise:', 
-                      style={'color': COLORS['text'], 'fontSize': '1.1em', 'marginBottom': '10px'}),
+                      style={
+                          'color': COLORS['text'], 
+                          'fontSize': '1em', 
+                          'marginBottom': '12px',
+                          'display': 'block',
+                          'fontWeight': '600'
+                      }),
             dcc.Dropdown(
                 id='symptom-selector',
-                options=[{'label': s, 'value': s} for s in symptom_cols[:20]],  # Top 20 sintomas
+                options=[{'label': s, 'value': s} for s in symptom_cols[:20]],
                 value=symptom_cols[:4] if len(symptom_cols) >= 4 else symptom_cols,
                 multi=True,
                 placeholder='Selecione sintomas...',
-                style={'backgroundColor': COLORS['secondary'], 'color': COLORS['text']}
+                style={
+                    'backgroundColor': COLORS['secondary'], 
+                    'color': COLORS['text'],
+                    'borderRadius': '8px'
+                }
             )
-        ], style={'marginBottom': '30px', 'padding': '20px', 'backgroundColor': COLORS['card'], 
-                 'borderRadius': '10px'}),
+        ], style={
+            'marginBottom': '30px', 
+            'padding': '25px', 
+            'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
+            'borderRadius': '15px',
+            'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
+            'border': f'1px solid {COLORS["border"]}'
+        }),
         
         html.Div([
             create_card([dcc.Graph(id='symptom-frequency-graphs')], 
@@ -392,7 +811,7 @@ def update_symptom_frequency(selected_symptoms, tab):
         font_color=COLORS['text']
     )
     
-    fig.update_xaxes(tickangle=45)
+    fig.update_xaxes(tickangle=-45)
     
     return fig
 
@@ -439,7 +858,7 @@ def update_correlation_matrix(tab):
         yaxis={'side': 'left'}
     )
     
-    fig.update_xaxes(tickangle=45)
+    fig.update_xaxes(tickangle=-45)
     
     return fig
 
@@ -447,8 +866,19 @@ def update_correlation_matrix(tab):
 def create_climate_layout():
     """Layout de análise climática"""
     return html.Div([
-        html.H2('🌡️ Relação entre Clima e Diagnósticos', 
-               style={'color': COLORS['primary'], 'marginBottom': '20px'}),
+        html.Div([
+            html.H2('Relação entre Clima e Diagnósticos', style={
+                'color': COLORS['text'], 
+                'marginBottom': '10px',
+                'fontSize': '2em',
+                'fontWeight': '700'
+            }),
+            html.P('Análise da influência das variáveis climáticas nos diferentes diagnósticos', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '1em',
+                'marginBottom': '30px'
+            })
+        ]),
         
         html.Div([
             create_card([dcc.Graph(id='temp-diagnosis-graph')], 
@@ -488,7 +918,7 @@ def update_temp_diagnosis(tab):
         paper_bgcolor=COLORS['card'],
         font_color=COLORS['text'],
         showlegend=False,
-        xaxis_tickangle=45
+        xaxis_tickangle=-45
     )
     
     return fig
@@ -513,7 +943,7 @@ def update_humidity_diagnosis(tab):
         paper_bgcolor=COLORS['card'],
         font_color=COLORS['text'],
         showlegend=False,
-        xaxis_tickangle=45
+        xaxis_tickangle=-45
     )
     
     return fig
@@ -538,7 +968,7 @@ def update_wind_diagnosis(tab):
         paper_bgcolor=COLORS['card'],
         font_color=COLORS['text'],
         showlegend=False,
-        xaxis_tickangle=45
+        xaxis_tickangle=-45
     )
     
     return fig
@@ -547,11 +977,28 @@ def update_wind_diagnosis(tab):
 def create_symptoms_layout():
     """Layout de análise de sintomas"""
     return html.Div([
-        html.H2('💊 Análise de Sintomas', style={'color': COLORS['primary'], 'marginBottom': '20px'}),
+        html.Div([
+            html.H2('Análise de Sintomas', style={
+                'color': COLORS['text'], 
+                'marginBottom': '10px',
+                'fontSize': '2em',
+                'fontWeight': '700'
+            }),
+            html.P('Mapeamento detalhado de sintomas e sua relação com diagnósticos', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '1em',
+                'marginBottom': '30px'
+            })
+        ]),
         
         html.Div([
             create_card([dcc.Graph(id='symptom-heatmap-graph')], 
                        'Heatmap de Sintomas por Diagnóstico (Top 15)')
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='diagnosis-by-symptom-graph')], 
+                       'Diagnóstico por Sintoma (Top 10 Sintomas)')
         ]),
         
         html.Div([
@@ -591,7 +1038,68 @@ def update_symptom_heatmap(tab):
         plot_bgcolor=COLORS['background'],
         paper_bgcolor=COLORS['card'],
         font_color=COLORS['text'],
-        xaxis_tickangle=45
+        xaxis_tickangle=-45
+    )
+    
+    return fig
+
+
+@app.callback(
+    Output('diagnosis-by-symptom-graph', 'figure'),
+    Input('tabs', 'value')
+)
+def update_diagnosis_by_symptom(tab):
+    """Atualiza gráfico de diagnóstico por sintoma (inverso)"""
+    load_data_and_models()
+    if tab != 'tab-symptoms':
+        return {}
+    
+    # Selecionar top 10 sintomas mais comuns
+    symptom_totals = df_global[symptom_cols].sum().sort_values(ascending=False).head(10)
+    top_10_symptoms = symptom_totals.index.tolist()
+    
+    # Criar subplots para cada sintoma
+    fig = make_subplots(
+        rows=5, cols=2,
+        subplot_titles=top_10_symptoms,
+        vertical_spacing=0.08,
+        horizontal_spacing=0.12
+    )
+    
+    colors = px.colors.qualitative.Set2
+    
+    for idx, symptom in enumerate(top_10_symptoms):
+        # Contar diagnósticos para pacientes com este sintoma
+        patients_with_symptom = df_global[df_global[symptom] == 1]
+        diagnosis_counts = patients_with_symptom['Diagnóstico'].value_counts()
+        
+        row = idx // 2 + 1
+        col = idx % 2 + 1
+        
+        fig.add_trace(
+            go.Bar(
+                x=diagnosis_counts.index, 
+                y=diagnosis_counts.values,
+                name=symptom,
+                showlegend=False,
+                marker_color=colors[idx % len(colors)],
+                text=diagnosis_counts.values,
+                textposition='outside'
+            ),
+            row=row, col=col
+        )
+        
+        # Ajustar ângulo dos labels do eixo x
+        fig.update_xaxes(tickangle=-45, row=row, col=col)
+    
+    fig.update_layout(
+        height=1200,
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        title_text='Distribuição de Diagnósticos por Sintoma',
+        title_x=0.5,
+        title_font_size=16
     )
     
     return fig
@@ -635,13 +1143,46 @@ def create_ml_layout():
     """Layout dos modelos de ML"""
     if classifier.model is None:
         return html.Div([
-            html.H2('🤖 Modelos de Machine Learning', style={'color': COLORS['primary']}),
-            html.P('⚠️ Modelos não carregados. Execute o script de treinamento primeiro.',
-                  style={'color': COLORS['text'], 'fontSize': '1.2em'})
+            html.Div([
+                html.H2('Modelos de Machine Learning', style={
+                    'color': COLORS['text'],
+                    'fontSize': '2em',
+                    'fontWeight': '700',
+                    'marginBottom': '20px'
+                }),
+                html.Div([
+                    html.P('⚠️ Modelos não carregados', style={
+                        'color': COLORS['warning'],
+                        'fontSize': '1.3em',
+                        'fontWeight': '600',
+                        'marginBottom': '10px'
+                    }),
+                    html.P('Execute o script de treinamento primeiro para visualizar os modelos.',
+                          style={'color': COLORS['text_secondary'], 'fontSize': '1em'})
+                ], style={
+                    'backgroundColor': COLORS['card'],
+                    'padding': '30px',
+                    'borderRadius': '15px',
+                    'border': f'2px solid {COLORS["warning"]}',
+                    'boxShadow': '0 8px 32px rgba(0,0,0,0.4)'
+                })
+            ])
         ])
     
     return html.Div([
-        html.H2('🤖 Modelos de Machine Learning', style={'color': COLORS['primary'], 'marginBottom': '20px'}),
+        html.Div([
+            html.H2('Modelos de Machine Learning', style={
+                'color': COLORS['text'], 
+                'marginBottom': '10px',
+                'fontSize': '2em',
+                'fontWeight': '700'
+            }),
+            html.P('Performance e visualizações dos modelos de classificação e clusterização', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '1em',
+                'marginBottom': '30px'
+            })
+        ]),
         
         html.Div([
             create_card([dcc.Graph(id='feature-importance-graph')], 
@@ -649,8 +1190,27 @@ def create_ml_layout():
         ]),
         
         html.Div([
-            create_card([dcc.Graph(id='cluster-visualization-graph')], 
-                       'Visualização de Clusters (PCA 2D)')
+            html.Div([
+                create_card([dcc.Graph(id='cluster-visualization-2d-graph')], 
+                           'Visualização de Clusters (PCA 2D)')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+            
+            html.Div([
+                create_card([dcc.Graph(id='cluster-pca-3d-graph')], 
+                           'Visualização de Clusters PCA 3D')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+        ]),
+        
+        html.Div([
+            html.Div([
+                create_card([dcc.Graph(id='cluster-visualization-3d-graph')], 
+                           'Visualização de Clusters 3D (Variáveis Climáticas)')
+            ], style={'width': '100%', 'padding': '10px'}),
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='classification-performance-graph')], 
+                       'Performance da Classificação por Classe')
         ]),
     ])
 
@@ -688,11 +1248,11 @@ def update_feature_importance(tab):
 
 
 @app.callback(
-    Output('cluster-visualization-graph', 'figure'),
+    Output('cluster-visualization-2d-graph', 'figure'),
     Input('tabs', 'value')
 )
-def update_cluster_visualization(tab):
-    """Atualiza visualização de clusters"""
+def update_cluster_visualization_2d(tab):
+    """Atualiza visualização de clusters 2D"""
     load_data_and_models()
     if tab != 'tab-ml' or clusterer.labels_ is None:
         return {}
@@ -732,15 +1292,224 @@ def update_cluster_visualization(tab):
     return fig
 
 
+@app.callback(
+    Output('cluster-pca-3d-graph', 'figure'),
+    Input('tabs', 'value')
+)
+def update_cluster_pca_3d(tab):
+    """Atualiza visualização de clusters em 3D com PCA"""
+    load_data_and_models()
+    if tab != 'tab-ml' or clusterer.labels_ is None:
+        return {}
+    
+    # Preparar dados para visualização
+    X_scaled = clusterer.scaler.transform(
+        df_global.select_dtypes(include=[np.number]).drop('Diagnóstico', axis=1, errors='ignore')
+    )
+    
+    # PCA para 3D
+    from sklearn.decomposition import PCA
+    pca = PCA(n_components=3, random_state=42)
+    X_pca = pca.fit_transform(X_scaled)
+    
+    # Criar DataFrame para plotar
+    plot_df = pd.DataFrame({
+        'PC1': X_pca[:, 0],
+        'PC2': X_pca[:, 1],
+        'PC3': X_pca[:, 2],
+        'Cluster': clusterer.labels_.astype(str),
+        'Diagnóstico': df_global['Diagnóstico'].values
+    })
+    
+    fig = px.scatter_3d(
+        plot_df, 
+        x='PC1', 
+        y='PC2', 
+        z='PC3',
+        color='Cluster',
+        hover_data=['Diagnóstico'],
+        title='',
+        color_discrete_sequence=px.colors.qualitative.Set3,
+        labels={
+            'PC1': f'PC1 ({pca.explained_variance_ratio_[0]:.1%})',
+            'PC2': f'PC2 ({pca.explained_variance_ratio_[1]:.1%})',
+            'PC3': f'PC3 ({pca.explained_variance_ratio_[2]:.1%})'
+        }
+    )
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        height=600,
+        scene=dict(
+            xaxis=dict(
+                title=f'PC1 ({pca.explained_variance_ratio_[0]:.1%} var.)', 
+                backgroundcolor=COLORS['background']
+            ),
+            yaxis=dict(
+                title=f'PC2 ({pca.explained_variance_ratio_[1]:.1%} var.)', 
+                backgroundcolor=COLORS['background']
+            ),
+            zaxis=dict(
+                title=f'PC3 ({pca.explained_variance_ratio_[2]:.1%} var.)', 
+                backgroundcolor=COLORS['background']
+            ),
+            bgcolor=COLORS['background']
+        )
+    )
+    
+    return fig
+
+
+@app.callback(
+    Output('cluster-visualization-3d-graph', 'figure'),
+    Input('tabs', 'value')
+)
+def update_cluster_visualization_3d(tab):
+    """Atualiza visualização de clusters em 3D com variáveis climáticas"""
+    load_data_and_models()
+    if tab != 'tab-ml' or clusterer.labels_ is None:
+        return {}
+    
+    # Criar DataFrame para plotar com as 3 variáveis climáticas
+    plot_df = pd.DataFrame({
+        'Temperatura (°C)': df_global['Temperatura (°C)'],
+        'Umidade': df_global['Umidade'],
+        'Velocidade do Vento (km/h)': df_global['Velocidade do Vento (km/h)'],
+        'Cluster': clusterer.labels_.astype(str),
+        'Diagnóstico': df_global['Diagnóstico'].values,
+        'Idade': df_global['Idade']
+    })
+    
+    fig = px.scatter_3d(
+        plot_df, 
+        x='Temperatura (°C)', 
+        y='Umidade', 
+        z='Velocidade do Vento (km/h)',
+        color='Cluster',
+        hover_data=['Diagnóstico', 'Idade'],
+        title='',
+        color_discrete_sequence=px.colors.qualitative.Set3,
+        labels={
+            'Temperatura (°C)': 'Temperatura (°C)',
+            'Umidade': 'Umidade (%)',
+            'Velocidade do Vento (km/h)': 'Vento (km/h)'
+        }
+    )
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        height=600,
+        scene=dict(
+            xaxis=dict(title='Temperatura (°C)', backgroundcolor=COLORS['background']),
+            yaxis=dict(title='Umidade (%)', backgroundcolor=COLORS['background']),
+            zaxis=dict(title='Vento (km/h)', backgroundcolor=COLORS['background']),
+            bgcolor=COLORS['background']
+        )
+    )
+    
+    return fig
+
+
+@app.callback(
+    Output('classification-performance-graph', 'figure'),
+    Input('tabs', 'value')
+)
+def update_classification_performance(tab):
+    """Atualiza gráfico de performance da classificação"""
+    load_data_and_models()
+    if tab != 'tab-ml' or classifier.model is None:
+        return {}
+    
+    # Se houver métricas de validação disponíveis, usar
+    # Caso contrário, usar feature importance como proxy
+    if hasattr(classifier, 'cv_scores') and classifier.cv_scores:
+        # Mostrar scores de cross-validation
+        metrics_df = pd.DataFrame({
+            'Fold': [f'Fold {i+1}' for i in range(len(classifier.cv_scores))],
+            'Accuracy': classifier.cv_scores
+        })
+        
+        fig = px.bar(metrics_df, x='Fold', y='Accuracy',
+                    title='',
+                    color='Accuracy',
+                    color_continuous_scale='Blues')
+        
+        fig.add_hline(y=np.mean(classifier.cv_scores), 
+                     line_dash="dash", 
+                     line_color="red",
+                     annotation_text=f"Média: {np.mean(classifier.cv_scores):.3f}")
+    else:
+        # Mostrar distribuição de predições por classe
+        from collections import Counter
+        
+        # Fazer predição em todo o dataset
+        X = df_global[classifier.feature_names]
+        predictions = classifier.predict(X)
+        
+        # Contar predições vs real
+        pred_counts = pd.DataFrame({
+            'Diagnóstico': df_global['Diagnóstico'].value_counts().index,
+            'Real': df_global['Diagnóstico'].value_counts().values,
+            'Predito': [Counter(predictions)[diag] for diag in df_global['Diagnóstico'].value_counts().index]
+        })
+        
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=pred_counts['Diagnóstico'], y=pred_counts['Real'], 
+                            name='Real', marker_color=COLORS['primary']))
+        fig.add_trace(go.Bar(x=pred_counts['Diagnóstico'], y=pred_counts['Predito'], 
+                            name='Predito', marker_color=COLORS['accent']))
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis_title='Diagnóstico',
+        yaxis_title='Contagem' if not hasattr(classifier, 'cv_scores') else 'Accuracy',
+        xaxis_tickangle=-45,
+        barmode='group',
+        height=500
+    )
+    
+    return fig
+
+
 def create_prediction_layout():
     """Layout de predição"""
     return html.Div([
-        html.H2('🎯 Sistema de Predição de Diagnóstico', 
-               style={'color': COLORS['primary'], 'marginBottom': '20px'}),
+        html.Div([
+            html.H2('Sistema de Predição de Diagnóstico', style={
+                'color': COLORS['text'], 
+                'marginBottom': '10px',
+                'fontSize': '2em',
+                'fontWeight': '700'
+            }),
+            html.P('Utilize inteligência artificial para prever diagnósticos baseados em dados clínicos e climáticos', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '1em',
+                'marginBottom': '30px'
+            })
+        ]),
         
         create_card([
-            html.P('Insira os dados do paciente para obter uma predição de diagnóstico:',
-                  style={'color': COLORS['text'], 'fontSize': '1.1em', 'marginBottom': '20px'}),
+            html.Div([
+                html.Div('🔮', style={
+                    'fontSize': '3em',
+                    'textAlign': 'center',
+                    'marginBottom': '15px'
+                }),
+                html.P('Insira os dados do paciente para obter uma predição de diagnóstico:',
+                      style={
+                          'color': COLORS['text'], 
+                          'fontSize': '1.1em', 
+                          'marginBottom': '30px',
+                          'textAlign': 'center',
+                          'fontWeight': '500'
+                      })
+            ]),
             
             # Inputs climáticos e demográficos
             html.Div([
@@ -787,19 +1556,25 @@ def create_prediction_layout():
                 )
             ], style={'marginTop': '20px'}),
             
-            html.Button('🔍 Fazer Predição', id='predict-button', 
-                       style={
-                           'backgroundColor': COLORS['primary'],
-                           'color': 'white',
-                           'padding': '15px 40px',
-                           'border': 'none',
-                           'borderRadius': '5px',
-                           'fontSize': '1.1em',
-                           'cursor': 'pointer',
-                           'marginTop': '30px',
-                           'fontWeight': 'bold',
-                           'boxShadow': '0 4px 6px rgba(0,0,0,0.3)'
-                       }),
+            html.Div([
+                html.Button('🔍 Fazer Predição', id='predict-button', 
+                           style={
+                               'background': f'linear-gradient(135deg, {COLORS["primary"]} 0%, {COLORS["primary_light"]} 100%)',
+                               'color': 'white',
+                               'padding': '18px 50px',
+                               'border': 'none',
+                               'borderRadius': '50px',
+                               'fontSize': '1.2em',
+                               'cursor': 'pointer',
+                               'fontWeight': '700',
+                               'boxShadow': '0 10px 30px rgba(102, 126, 234, 0.4)',
+                               'transition': 'all 0.3s ease',
+                               'textTransform': 'uppercase',
+                               'letterSpacing': '1px',
+                               'width': '100%',
+                               'maxWidth': '400px'
+                           })
+            ], style={'textAlign': 'center', 'marginTop': '40px'}),
             
             html.Div(id='prediction-result', style={'marginTop': '30px'})
         ])
@@ -850,46 +1625,131 @@ def make_prediction(n_clicks, age, temp, humidity, wind, symptoms):
         
         result = html.Div([
             html.Div([
-                html.H3('🎯 Resultado da Predição', 
-                       style={'color': COLORS['primary'], 'marginBottom': '20px'}),
-                
                 html.Div([
-                    html.H4('Diagnóstico Predito:', style={'color': COLORS['text']}),
-                    html.H2(diagnosis, style={'color': COLORS['accent'], 'margin': '10px 0'}),
-                    html.P(f'Confiança: {confidence:.2f}%', 
-                          style={'color': COLORS['text'], 'fontSize': '1.2em'})
-                ], style={'backgroundColor': COLORS['background'], 'padding': '20px', 
-                         'borderRadius': '10px', 'marginBottom': '20px', 'textAlign': 'center'}),
-                
-                html.H4('📊 Probabilidades por Diagnóstico:', 
-                       style={'color': COLORS['text'], 'marginTop': '20px'}),
+                    html.Div('✨', style={'fontSize': '3em', 'textAlign': 'center', 'marginBottom': '15px'}),
+                    html.H3('Resultado da Predição', style={
+                        'color': COLORS['text'], 
+                        'marginBottom': '30px',
+                        'textAlign': 'center',
+                        'fontSize': '1.8em',
+                        'fontWeight': '700'
+                    })
+                ]),
                 
                 html.Div([
                     html.Div([
-                        html.Span(f'{diag}: ', style={'fontWeight': 'bold', 'color': COLORS['text']}),
-                        html.Span(f'{prob*100:.2f}%', 
-                                style={'color': COLORS['accent'] if prob == max(probabilities) else COLORS['text']})
-                    ], style={'marginBottom': '10px'})
-                    for diag, prob in all_probs[:5]
+                        html.H4('Diagnóstico Predito', style={
+                            'color': COLORS['text_secondary'], 
+                            'margin': '0 0 15px 0',
+                            'fontSize': '0.9em',
+                            'textTransform': 'uppercase',
+                            'letterSpacing': '1px',
+                            'fontWeight': '600'
+                        }),
+                        html.H2(diagnosis, style={
+                            'color': COLORS['accent'], 
+                            'margin': '10px 0 20px 0',
+                            'fontSize': '2.5em',
+                            'fontWeight': '700',
+                            'background': f'linear-gradient(135deg, {COLORS["accent"]} 0%, {COLORS["accent_secondary"]} 100%)',
+                            'WebkitBackgroundClip': 'text',
+                            'WebkitTextFillColor': 'transparent'
+                        }),
+                        html.Div([
+                            html.Span('Confiança: ', style={
+                                'color': COLORS['text_secondary'],
+                                'fontSize': '1em',
+                                'fontWeight': '500'
+                            }),
+                            html.Span(f'{confidence:.2f}%', style={
+                                'color': COLORS['success'] if confidence > 70 else COLORS['warning'],
+                                'fontSize': '1.5em',
+                                'fontWeight': '700'
+                            })
+                        ])
+                    ], style={'textAlign': 'center'})
+                ], style={
+                    'background': f'linear-gradient(135deg, {COLORS["background"]} 0%, {COLORS["background_light"]} 100%)',
+                    'padding': '30px', 
+                    'borderRadius': '15px', 
+                    'marginBottom': '30px',
+                    'border': f'2px solid {COLORS["accent"]}',
+                    'boxShadow': f'0 0 30px rgba(240, 147, 251, 0.3)'
+                }),
+                
+                html.Div([
+                    html.H4('Probabilidades por Diagnóstico', style={
+                        'color': COLORS['text'], 
+                        'marginBottom': '20px',
+                        'fontSize': '1.2em',
+                        'fontWeight': '600',
+                        'borderBottom': f'2px solid {COLORS["border"]}',
+                        'paddingBottom': '10px'
+                    }),
+                    
+                    html.Div([
+                        html.Div([
+                            html.Div([
+                                html.Span(diag, style={
+                                    'fontWeight': '600', 
+                                    'color': COLORS['text'],
+                                    'fontSize': '1em'
+                                }),
+                                html.Div([
+                                    html.Div(style={
+                                        'width': f'{prob*100}%',
+                                        'height': '8px',
+                                        'background': f'linear-gradient(90deg, {COLORS["accent"]} 0%, {COLORS["accent_secondary"]} 100%)' if prob == max(probabilities) else f'linear-gradient(90deg, {COLORS["primary"]} 0%, {COLORS["primary_light"]} 100%)',
+                                        'borderRadius': '4px',
+                                        'transition': 'width 0.5s ease'
+                                    })
+                                ], style={
+                                    'backgroundColor': COLORS['background'],
+                                    'borderRadius': '4px',
+                                    'marginTop': '8px',
+                                    'marginBottom': '8px'
+                                }),
+                                html.Span(f'{prob*100:.2f}%', style={
+                                    'color': COLORS['accent'] if prob == max(probabilities) else COLORS['text_secondary'],
+                                    'fontSize': '0.9em',
+                                    'fontWeight': '700'
+                                })
+                            ], style={
+                                'padding': '15px',
+                                'backgroundColor': COLORS['background_light'],
+                                'borderRadius': '10px',
+                                'marginBottom': '12px',
+                                'border': f'2px solid {COLORS["accent"]}' if prob == max(probabilities) else f'1px solid {COLORS["border"]}',
+                                'boxShadow': f'0 4px 15px rgba(240, 147, 251, 0.3)' if prob == max(probabilities) else '0 2px 8px rgba(0,0,0,0.2)'
+                            })
+                        ])
+                        for diag, prob in all_probs[:5]
+                    ])
                 ])
-            ], style={'backgroundColor': COLORS['card'], 'padding': '30px', 
-                     'borderRadius': '10px', 'boxShadow': '0 4px 8px rgba(0,0,0,0.3)'})
+            ], style={
+                'backgroundColor': COLORS['card'], 
+                'padding': '40px', 
+                'borderRadius': '20px', 
+                'boxShadow': '0 10px 40px rgba(0,0,0,0.5)',
+                'border': f'1px solid {COLORS["border"]}'
+            })
         ])
         
         return result
         
     except Exception as e:
         return html.Div([
-            html.P(f'❌ Erro na predição: {str(e)}', 
+            html.P(f'Erro na predição: {str(e)}', 
                   style={'color': 'red', 'fontSize': '1.1em'})
         ])
 
 
 if __name__ == '__main__':
-    print("\n" + "="*60)
-    print("🌡️ VitaNimbus Dashboard")
-    print("="*60)
-    print("✓ Dashboard iniciado com sucesso!")
-    print("📊 Acesse: http://127.0.0.1:8050/")
-    print("="*60 + "\n")
+    print("\n" + "="*70)
+    print("✨ NIMBUSVITA DASHBOARD")
+    print("="*70)
+    print("🚀 Dashboard iniciado com sucesso!")
+    print("🌐 Acesse: http://127.0.0.1:8050/")
+    print("📊 Sistema de Predição de Doenças Relacionadas ao Clima")
+    print("="*70 + "\n")
     app.run(debug=True, port=8050)
