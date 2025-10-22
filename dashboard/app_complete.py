@@ -27,11 +27,12 @@ classifier = None
 clusterer = None
 loader = None
 symptom_cols = []
+diagnosis_cols = []
 climatic_vars = []
 
 def load_data_and_models():
     """Carrega dados e modelos apenas uma vez"""
-    global df_global, eda_global, classifier, clusterer, loader, symptom_cols, climatic_vars
+    global df_global, eda_global, classifier, clusterer, loader, symptom_cols, diagnosis_cols, climatic_vars
     
     if df_global is not None:
         return  # Já carregado
@@ -45,26 +46,31 @@ def load_data_and_models():
     # Obter feature names
     feature_dict = loader.get_feature_names()
     symptom_cols = feature_dict['symptoms']
+    diagnosis_cols = feature_dict['diagnosis']
     climatic_vars = feature_dict['climatic']
     
-    # Carregar modelos
-    print("Carregando modelos...")
+    # Carregar modelos localmente (fallback). Prefer usar API for predictions.
+    print("Carregando modelos locais (fallback)...")
     classifier = DiagnosisClassifier()
     clusterer = DiseaseClusterer()
-    
+
     try:
         classifier_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'saved_models', 'classifier_model.pkl')
         classifier.load_model(classifier_path)
-        print("✓ Classificador carregado")
+        print("✓ Classificador local carregado")
     except Exception as e:
-        print(f"⚠ Classificador não carregado: {e}")
-    
+        print(f"⚠ Classificador local não carregado: {e}")
+
     try:
         clusterer_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'saved_models', 'clustering_model.pkl')
         clusterer.load_model(clusterer_path)
-        print("✓ Clusterizador carregado")
+        print("✓ Clusterizador local carregado")
     except Exception as e:
-        print(f"⚠ Clusterizador não carregado: {e}")
+        print(f"⚠ Clusterizador local não carregado: {e}")
+
+    # API base URL (env override allowed)
+    global API_BASE
+    API_BASE = os.environ.get('VITANIMBUS_API', 'http://127.0.0.1:5000')
 
 # Inicializar app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -2567,10 +2573,63 @@ def make_prediction(n_clicks, age, temp, humidity, wind, symptoms):
         X = pd.DataFrame([features])
         X = X[classifier.feature_names]
         
-        # Fazer predição
-        diagnosis = classifier.predict(X)[0]
-        probabilities = classifier.predict_proba(X)[0]
-        confidence = max(probabilities) * 100
+        # First try to call the API if requests is available
+        cluster_info = None
+        api_response = None
+        if requests is not None:
+            try:
+                payload = {
+                    'idade': features.get('Idade'),
+                    'temperatura': features.get('Temperatura (°C)'),
+                    'umidade': features.get('Umidade'),
+                    'velocidade_vento': features.get('Velocidade do Vento (km/h)'),
+                    'sintomas': {k: int(v) for k, v in features.items() if k not in ['Idade','Temperatura (°C)','Umidade','Velocidade do Vento (km/h)']}
+                }
+
+                # /predict
+                predict_url = f"{API_BASE}/predict"
+                resp = requests.post(predict_url, json=payload, timeout=2)
+                if resp.status_code == 200:
+                    api_response = resp.json()
+                # /cluster and /risk_factors
+                try:
+                    cluster_url = f"{API_BASE}/cluster"
+                    r2 = requests.post(cluster_url, json=payload, timeout=2)
+                    if r2.status_code == 200:
+                        cluster_info = r2.json()
+                        # get more detailed risk_factors from API
+                        rf_url = f"{API_BASE}/risk_factors"
+                        r3 = requests.post(rf_url, json=payload, timeout=2)
+                        if r3.status_code == 200:
+                            cluster_info['risk_factors'] = r3.json()
+                except Exception:
+                    cluster_info = None
+            except Exception:
+                api_response = None
+
+        # If API gave a prediction, use it; otherwise fallback to local model
+        if api_response is not None:
+            diagnosis = api_response.get('diagnostico_predito', 'N/A')
+            probabilities = [api_response.get('probabilidades', {}).get(c, 0.0) for c in getattr(classifier, 'label_encoder',).classes_]
+            confidence = max(probabilities) * 100 if probabilities else 0.0
+        else:
+            # Fazer predição local
+            diagnosis = classifier.predict(X)[0]
+            probabilities = classifier.predict_proba(X)[0]
+            confidence = max(probabilities) * 100
+
+            # Prever cluster e local risk factors (fallback)
+            try:
+                if clusterer is not None and getattr(clusterer, 'model', None) is not None:
+                    cluster_label = int(clusterer.predict_cluster(X.values)[0])
+                    risk_factors = clusterer.identify_risk_factors(df_global, cluster_label)
+                    top_risks = list(risk_factors.items())[:5]
+                    cluster_info = {
+                        'cluster_label': cluster_label,
+                        'top_risks': top_risks
+                    }
+            except Exception:
+                cluster_info = None
         
         # Preparar resultado
         all_probs = sorted(zip(classifier.label_encoder.classes_, probabilities), 
@@ -2678,7 +2737,22 @@ def make_prediction(n_clicks, age, temp, humidity, wind, symptoms):
                         ])
                         for diag, prob in all_probs[:5]
                     ])
-                ])
+                ]),
+
+                # Informação de cluster (se disponível)
+                html.Div([
+                    html.H4('Cluster Identificado (contexto ambiental)', style={
+                        'color': COLORS['text'], 'marginTop': '20px', 'fontSize': '1em', 'fontWeight': '600'
+                    }),
+                    html.Div([
+                        html.P(f"Cluster: {cluster_info['cluster_label']}") if cluster_info else html.P('Cluster: N/A'),
+                        html.P('Top fatores de risco (diferença média vs resto):') if cluster_info else html.P(''),
+                        html.Ul([
+                            html.Li(f"{k}: {v['difference']:.2f} (rel: {v['relative_diff']:+.1f}%)") for k, v in cluster_info['top_risks']
+                        ]) if cluster_info and cluster_info.get('top_risks') else html.P('Nenhum fator disponível')
+                    ], style={'textAlign': 'left', 'padding': '10px'})
+                ], style={'marginTop': '15px', 'paddingTop': '10px', 'borderTop': f'1px dashed {COLORS['border']}' }),
+
             ], style={
                 'backgroundColor': COLORS['card'], 
                 'padding': '40px', 

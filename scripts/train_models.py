@@ -12,6 +12,7 @@ from src.data_processing.data_loader import DataLoader
 from src.models.classifier import DiagnosisClassifier
 from src.models.clustering import DiseaseClusterer
 import logging
+import json
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -72,10 +73,20 @@ def train_classifier(data_path: str, save_path: str):
     for feature, importance in top_features.items():
         logger.info(f"  {feature}: {importance:.4f}")
     
+    # Atribuir métricas ao objeto classifier e salvar modelo
+    classifier.metrics = metrics
     # Salvar modelo
     logger.info(f"\nSalvando modelo em: {save_path}")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     classifier.save_model(save_path)
+
+    # Salvar métricas em results/
+    results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'results'))
+    os.makedirs(results_dir, exist_ok=True)
+    metrics_path = os.path.join(results_dir, 'classifier_metrics.json')
+    with open(metrics_path, 'w', encoding='utf-8') as f:
+        json.dump({k: (v.tolist() if hasattr(v, 'tolist') else v) for k, v in metrics.items()}, f, ensure_ascii=False, indent=2)
+    logger.info(f"Métricas do classificador salvas em: {metrics_path}")
     
     logger.info("✅ Treinamento do classificador concluído!")
     return classifier, metrics
@@ -137,6 +148,20 @@ def train_clusterer(data_path: str, save_path: str):
     logger.info(f"\nSalvando modelo em: {save_path}")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     clusterer.save_model(save_path)
+
+    # Salvar métricas e perfis em results/
+    results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'results'))
+    os.makedirs(results_dir, exist_ok=True)
+    cluster_metrics_path = os.path.join(results_dir, 'cluster_metrics.json')
+    with open(cluster_metrics_path, 'w', encoding='utf-8') as f:
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
+    logger.info(f"Métricas de clusterização salvas em: {cluster_metrics_path}")
+
+    # Salvar perfis dos clusters em CSV
+    cluster_profiles = clusterer.get_cluster_profiles(df, X_scaled)
+    profiles_path = os.path.join(results_dir, 'cluster_profiles.csv')
+    cluster_profiles.to_csv(profiles_path)
+    logger.info(f"Perfis de cluster salvos em: {profiles_path}")
     
     logger.info("✅ Treinamento do clusterizador concluído!")
     return clusterer, metrics
