@@ -9,7 +9,7 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_har
 from sklearn.decomposition import PCA
 import joblib
 import logging
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class DiseaseClusterer:
         self.scaler = StandardScaler()
         self.pca = None
         self.labels_ = None
-        self.feature_names = None
+        self.feature_names: Optional[List[str]] = None
         
     def prepare_data(self, df: pd.DataFrame, exclude_cols=None) -> np.ndarray:
         """
@@ -61,6 +61,23 @@ class DiseaseClusterer:
         
         logger.info(f"Dados preparados para clusterização: {X_scaled.shape}")
         return X_scaled
+
+    def transform_with_training_features(self, df: pd.DataFrame) -> np.ndarray:
+        """Transforma dados usando as mesmas features e ordem do treinamento."""
+        if self.feature_names is None:
+            raise ValueError("Feature names não definidos; treine ou carregue o clusterizador antes de transformar dados.")
+
+        if not hasattr(self.scaler, 'mean_'):
+            raise ValueError("Scaler não está ajustado; execute o treinamento antes de transformar dados.")
+
+        numeric_df = df.select_dtypes(include=[np.number])
+        missing = [col for col in self.feature_names if col not in numeric_df.columns]
+        if missing:
+            missing_str = ', '.join(missing)
+            raise ValueError(f"Colunas ausentes para transformar dados com o clusterizador: {missing_str}")
+
+        ordered_data = numeric_df[self.feature_names].copy()
+        return self.scaler.transform(ordered_data)
         
     def find_optimal_clusters(self, X: np.ndarray, max_clusters=10) -> Dict:
         """
@@ -75,7 +92,7 @@ class DiseaseClusterer:
         """
         inertias = []
         silhouette_scores = []
-        k_range = range(2, max_clusters + 1)
+        k_range = list(range(2, max_clusters + 1))
         
         for k in k_range:
             kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init=10)
@@ -83,17 +100,37 @@ class DiseaseClusterer:
             inertias.append(kmeans.inertia_)
             silhouette_scores.append(silhouette_score(X, kmeans.labels_))
             
-        results = {
-            'k_values': list(k_range),
-            'inertias': inertias,
-            'silhouette_scores': silhouette_scores
-        }
-        
         # Encontrar melhor k baseado no silhouette score
-        best_k = k_range[np.argmax(silhouette_scores)]
-        logger.info(f"Melhor número de clusters (silhouette): {best_k}")
-        
-        return results
+        silhouette_best_k = k_range[int(np.argmax(silhouette_scores))]
+
+        # Método do cotovelo (distância do ponto à linha entre extremidades)
+        start_point = np.array([k_range[0], inertias[0]])
+        end_point = np.array([k_range[-1], inertias[-1]])
+        vector = end_point - start_point
+        norm = np.linalg.norm(vector)
+        elbow_distances = []
+
+        if norm == 0:
+            elbow_distances = [0.0 for _ in k_range]
+            elbow_k = k_range[0]
+        else:
+            for k_value, inertia in zip(k_range, inertias):
+                point = np.array([k_value, inertia])
+                distance = np.abs(np.cross(vector, start_point - point)) / norm
+                elbow_distances.append(float(distance))
+            elbow_k = k_range[int(np.argmax(elbow_distances))]
+
+        logger.info(f"Melhor número de clusters (silhouette): {silhouette_best_k}")
+        logger.info(f"Sugestão pelo método do cotovelo: {elbow_k}")
+
+        return {
+            'k_values': k_range,
+            'inertias': inertias,
+            'silhouette_scores': silhouette_scores,
+            'silhouette_best_k': silhouette_best_k,
+            'elbow_distances': elbow_distances,
+            'elbow_k': elbow_k
+        }
         
     def train_kmeans(self, X: np.ndarray, n_clusters=3, **kwargs) -> None:
         """

@@ -46,3 +46,9 @@ data/*.csv
 data/*.json
 data/*.xlsx
 !data/README.md
+
+# Models
+models/
+
+# Results
+results/

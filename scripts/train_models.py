@@ -4,6 +4,7 @@ Script para treinar modelos de Machine Learning
 import pandas as pd
 import sys
 import os
+from pathlib import Path
 
 # Adicionar src ao path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -18,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def train_classifier(data_path: str, save_path: str):
+def train_classifier(data_path: Path | str, save_path: Path | str):
     """
     Treina modelo de classificação
     
@@ -31,8 +32,11 @@ def train_classifier(data_path: str, save_path: str):
     logger.info("="*50)
     
     # Carregar dados
+    data_path = Path(data_path)
+    save_path = Path(save_path)
+
     logger.info(f"Carregando dados de: {data_path}")
-    loader = DataLoader(data_path)
+    loader = DataLoader(str(data_path))
     df = loader.get_clean_data()
     
     # Inicializar classificador
@@ -77,14 +81,14 @@ def train_classifier(data_path: str, save_path: str):
     classifier.metrics = metrics
     # Salvar modelo
     logger.info(f"\nSalvando modelo em: {save_path}")
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    classifier.save_model(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    classifier.save_model(str(save_path))
 
     # Salvar métricas em results/
-    results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'results'))
-    os.makedirs(results_dir, exist_ok=True)
-    metrics_path = os.path.join(results_dir, 'classifier_metrics.json')
-    with open(metrics_path, 'w', encoding='utf-8') as f:
+    results_dir = Path(__file__).resolve().parent.parent / 'results'
+    results_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = results_dir / 'classifier_metrics.json'
+    with metrics_path.open('w', encoding='utf-8') as f:
         json.dump({k: (v.tolist() if hasattr(v, 'tolist') else v) for k, v in metrics.items()}, f, ensure_ascii=False, indent=2)
     logger.info(f"Métricas do classificador salvas em: {metrics_path}")
     
@@ -92,7 +96,7 @@ def train_classifier(data_path: str, save_path: str):
     return classifier, metrics
 
 
-def train_clusterer(data_path: str, save_path: str):
+def train_clusterer(data_path: Path | str, save_path: Path | str):
     """
     Treina modelo de clusterização
     
@@ -105,8 +109,11 @@ def train_clusterer(data_path: str, save_path: str):
     logger.info("="*50)
     
     # Carregar dados
+    data_path = Path(data_path)
+    save_path = Path(save_path)
+
     logger.info(f"Carregando dados de: {data_path}")
-    loader = DataLoader(data_path)
+    loader = DataLoader(str(data_path))
     df = loader.get_clean_data()
     
     # Inicializar clusterizador
@@ -120,10 +127,15 @@ def train_clusterer(data_path: str, save_path: str):
     logger.info("Encontrando número ótimo de clusters...")
     optimal_results = clusterer.find_optimal_clusters(X_scaled, max_clusters=10)
     
-    best_k = optimal_results['k_values'][
-        optimal_results['silhouette_scores'].index(max(optimal_results['silhouette_scores']))
-    ]
-    logger.info(f"Melhor número de clusters: {best_k}")
+    silhouette_best_k = optimal_results.get('silhouette_best_k')
+    elbow_k = optimal_results.get('elbow_k')
+
+    if silhouette_best_k is not None:
+        logger.info(f"Melhor número de clusters (silhouette): {silhouette_best_k}")
+    if elbow_k is not None and elbow_k != silhouette_best_k:
+        logger.info(f"Sugestão pelo método do cotovelo: {elbow_k}")
+
+    best_k = silhouette_best_k or elbow_k or 3
     
     # Treinar K-Means
     logger.info(f"Treinando K-Means com {best_k} clusters...")
@@ -146,20 +158,34 @@ def train_clusterer(data_path: str, save_path: str):
     
     # Salvar modelo
     logger.info(f"\nSalvando modelo em: {save_path}")
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    clusterer.save_model(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    clusterer.save_model(str(save_path))
 
     # Salvar métricas e perfis em results/
-    results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'results'))
-    os.makedirs(results_dir, exist_ok=True)
-    cluster_metrics_path = os.path.join(results_dir, 'cluster_metrics.json')
-    with open(cluster_metrics_path, 'w', encoding='utf-8') as f:
+    results_dir = Path(__file__).resolve().parent.parent / 'results'
+    results_dir.mkdir(parents=True, exist_ok=True)
+    cluster_metrics_path = results_dir / 'cluster_metrics.json'
+    with cluster_metrics_path.open('w', encoding='utf-8') as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
     logger.info(f"Métricas de clusterização salvas em: {cluster_metrics_path}")
 
+    # Salvar dados do método do cotovelo
+    elbow_data = {
+        'k_values': optimal_results['k_values'],
+        'inertias': [float(val) for val in optimal_results['inertias']],
+        'silhouette_scores': [float(val) for val in optimal_results['silhouette_scores']],
+        'silhouette_best_k': int(silhouette_best_k) if silhouette_best_k is not None else None,
+        'elbow_distances': [float(val) for val in optimal_results.get('elbow_distances', [])],
+        'elbow_k': int(elbow_k) if elbow_k is not None else None
+    }
+    elbow_path = results_dir / 'cluster_elbow.json'
+    with elbow_path.open('w', encoding='utf-8') as f:
+        json.dump(elbow_data, f, ensure_ascii=False, indent=2)
+    logger.info(f"Dados do método do cotovelo salvos em: {elbow_path}")
+
     # Salvar perfis dos clusters em CSV
     cluster_profiles = clusterer.get_cluster_profiles(df, X_scaled)
-    profiles_path = os.path.join(results_dir, 'cluster_profiles.csv')
+    profiles_path = results_dir / 'cluster_profiles.csv'
     cluster_profiles.to_csv(profiles_path)
     logger.info(f"Perfis de cluster salvos em: {profiles_path}")
     
@@ -170,9 +196,10 @@ def train_clusterer(data_path: str, save_path: str):
 def main():
     """Função principal"""
     # Definir caminhos
-    DATA_PATH = '../data/DATASET FINAL WRDP.csv'  # Ajuste conforme necessário
-    CLASSIFIER_SAVE_PATH = '../models/saved_models/classifier_model.pkl'
-    CLUSTERER_SAVE_PATH = '../models/saved_models/clustering_model.pkl'
+    base_dir = Path(__file__).resolve().parent.parent
+    DATA_PATH = base_dir / 'data' / 'DATASET FINAL WRDP.csv'
+    CLASSIFIER_SAVE_PATH = base_dir / 'models' / 'saved_models' / 'classifier_model.pkl'
+    CLUSTERER_SAVE_PATH = base_dir / 'models' / 'saved_models' / 'clustering_model.pkl'
     
     try:
         # Treinar classificador
