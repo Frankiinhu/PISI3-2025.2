@@ -1055,6 +1055,24 @@ def create_eda_layout():
                        'Matriz de Correlação: Sintomas x Diagnósticos')
         ]),
         
+<<<<<<< HEAD
+=======
+        html.Div([
+            create_card([dcc.Graph(id='correlation-matrix-graph')], 
+                       'Matriz de Correlação (Top Features)')
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='age-temp-distribution')], 
+                       'Distribuição Etária por Faixa de Temperatura')
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='wind-respiratory-scatter')], 
+                       'Regressão: Velocidade do Vento vs Sintomas Respiratórios')
+        ]),
+        
+>>>>>>> new-graphs
         # Explorador Interativo de Perfis Climáticos
         html.Div([
             html.H4('🔍 Explorador Interativo de Perfis Climáticos', style={
@@ -1319,11 +1337,6 @@ def create_eda_layout():
         ]),
         
         html.Div([
-            create_card([dcc.Graph(id='symptom-heatmap-graph')], 
-                       'Heatmap de Sintomas por Diagnóstico (Top 15)')
-        ]),
-        
-        html.Div([
             create_card([dcc.Graph(id='diagnosis-by-symptom-graph')], 
                        'Diagnóstico por Sintoma (Top 10 Sintomas)')
         ]),
@@ -1351,11 +1364,6 @@ def create_eda_layout():
                 'marginBottom': '25px',
                 'paddingLeft': '21px'
             })
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='correlation-matrix-graph')], 
-                       'Matriz de Correlação (Top Features)')
         ]),
         
         # Placeholder para análises multivariadas futuras
@@ -1433,16 +1441,40 @@ def update_correlation_matrix(tab):
     if tab != 'tab-eda':
         return go.Figure()
     
+<<<<<<< HEAD
     # Selecionar top features
     if classifier is not None and hasattr(classifier, 'feature_importances') and classifier.feature_importances is not None:
         top_features = classifier.feature_importances.head(15).index.tolist()
         # Adicionar variáveis climáticas
         features_to_correlate = list(set(top_features + climatic_vars + ['Idade']))
         features_to_correlate = [f for f in features_to_correlate if f in df_global.columns]
-    else:
-        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
-        features_to_correlate = climatic_vars + ['Idade'] + symptom_cols_filtered[:10]
+=======
+    # Definir features base na ordem específica
+    base_features = ['Idade', 'Gênero', 'Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
     
+    # Verificar quais features base existem no dataset
+    available_base = [f for f in base_features if f in df_global.columns]
+    
+    # Selecionar top 10 features adicionais
+    if has_feature_importances():
+        # Usar feature importance se disponível
+        # Excluir as features base da seleção
+        feature_importance_filtered = classifier.feature_importances[~classifier.feature_importances.index.isin(base_features)]
+        top_additional = feature_importance_filtered.head(10).index.tolist()
+>>>>>>> new-graphs
+    else:
+        # Usar sintomas mais frequentes (sem HIV/AIDS e sem features base)
+        symptom_cols_filtered = [col for col in symptom_cols 
+                                if 'HIV' not in col.upper() 
+                                and 'AIDS' not in col.upper()
+                                and col not in base_features]
+        symptom_sums = df_global[symptom_cols_filtered].sum().sort_values(ascending=False)
+        top_additional = symptom_sums.head(10).index.tolist()
+    
+    # Combinar: features base + top 10 adicionais
+    features_to_correlate = available_base + top_additional
+    
+    # Calcular matriz de correlação
     corr_matrix = df_global[features_to_correlate].corr()
     
     fig = go.Figure(data=go.Heatmap(
@@ -1467,6 +1499,204 @@ def update_correlation_matrix(tab):
     )
     
     fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+@app.callback(
+    Output('age-temp-distribution', 'figure'),
+    Input('tabs', 'value')
+)
+def update_age_temp_distribution(tab):
+    """Atualiza gráfico de distribuição etária por faixa de temperatura"""
+    load_data_and_models()
+    if tab != 'tab-eda':
+        return go.Figure()
+    
+    # Criar faixas de temperatura
+    df_temp = df_global.copy()
+    df_temp['Faixa Temperatura'] = pd.cut(
+        df_temp['Temperatura (°C)'],
+        bins=[0, 15, 20, 25, 30, 100],
+        labels=['Muito Baixa (<15°C)', 'Baixa (15-20°C)', 'Média (20-25°C)', 'Alta (25-30°C)', 'Muito Alta (>30°C)']
+    )
+    
+    # Criar faixas etárias
+    df_temp['Faixa Etária'] = pd.cut(
+        df_temp['Idade'],
+        bins=[0, 18, 30, 45, 60, 100],
+        labels=['0-18', '19-30', '31-45', '46-60', '60+']
+    )
+    
+    # Contar distribuição
+    distribution = df_temp.groupby(['Faixa Temperatura', 'Faixa Etária']).size().reset_index(name='Contagem')
+    
+    # Criar gráfico de barras agrupadas
+    fig = go.Figure()
+    
+    faixas_etarias = ['0-18', '19-30', '31-45', '46-60', '60+']
+    colors = [COLORS['primary'], COLORS['primary_light'], COLORS['accent'], COLORS['accent_secondary'], COLORS['secondary']]
+    
+    for i, faixa in enumerate(faixas_etarias):
+        data = distribution[distribution['Faixa Etária'] == faixa]
+        fig.add_trace(go.Bar(
+            x=data['Faixa Temperatura'],
+            y=data['Contagem'],
+            name=faixa,
+            marker_color=colors[i % len(colors)],
+            text=data['Contagem'],
+            textposition='outside'
+        ))
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis_title='Faixa de Temperatura',
+        yaxis_title='Número de Pacientes',
+        barmode='group',
+        legend=dict(
+            title='Faixa Etária',
+            orientation='h',
+            yanchor='bottom',
+            y=1.02,
+            xanchor='right',
+            x=1
+        ),
+        height=500,
+        margin=dict(t=80)
+    )
+    
+    return fig
+
+
+@app.callback(
+    Output('wind-respiratory-scatter', 'figure'),
+    Input('tabs', 'value')
+)
+def update_wind_respiratory_scatter(tab):
+    """Atualiza scatterplot de regressão: velocidade do vento vs sintomas respiratórios"""
+    load_data_and_models()
+    if tab != 'tab-eda':
+        return go.Figure()
+    
+    # Definir sintomas respiratórios
+    respiratory_symptoms = ['Coriza', 'Tosse', 'Dor de Garganta', 'Congestão Nasal', 
+                           'Dificuldade Respiratória', 'Chiado no Peito']
+    
+    # Filtrar apenas sintomas respiratórios que existem no dataset
+    available_respiratory = [s for s in respiratory_symptoms if s in df_global.columns]
+    
+    if not available_respiratory:
+        # Se não houver sintomas respiratórios específicos, retornar figura vazia
+        fig = go.Figure()
+        fig.add_annotation(
+            text="Sintomas respiratórios não encontrados no dataset",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color=COLORS['text_secondary'])
+        )
+        fig.update_layout(
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card']
+        )
+        return fig
+    
+    # Calcular frequência média de sintomas respiratórios por paciente
+    df_scatter = df_global.copy()
+    df_scatter['Freq_Respiratórios'] = df_scatter[available_respiratory].sum(axis=1) / len(available_respiratory)
+    
+    # Criar bins de velocidade do vento para melhor visualização
+    df_scatter['Wind_Bins'] = pd.cut(df_scatter['Velocidade do Vento (km/h)'], bins=20)
+    wind_resp_grouped = df_scatter.groupby('Wind_Bins').agg({
+        'Freq_Respiratórios': 'mean',
+        'Velocidade do Vento (km/h)': 'mean'
+    }).reset_index()
+    
+    # Remover NaN
+    wind_resp_grouped = wind_resp_grouped.dropna()
+    
+    # Calcular regressão linear
+    from numpy import polyfit, poly1d
+    x = wind_resp_grouped['Velocidade do Vento (km/h)'].values
+    y = wind_resp_grouped['Freq_Respiratórios'].values
+    
+    # Coeficientes da regressão
+    coef = polyfit(x, y, 1)
+    poly_func = poly1d(coef)
+    y_pred = poly_func(x)
+    
+    # Calcular R²
+    from numpy import corrcoef
+    correlation_matrix = corrcoef(y, y_pred)
+    r_squared = correlation_matrix[0, 1] ** 2
+    
+    # Criar figura
+    fig = go.Figure()
+    
+    # Adicionar pontos do scatter
+    fig.add_trace(go.Scatter(
+        x=x,
+        y=y,
+        mode='markers',
+        name='Dados',
+        marker=dict(
+            size=10,
+            color=COLORS['primary'],
+            opacity=0.6,
+            line=dict(color='white', width=1)
+        ),
+        hovertemplate='<b>Vento:</b> %{x:.1f} km/h<br><b>Freq. Sintomas:</b> %{y:.2%}<extra></extra>'
+    ))
+    
+    # Adicionar linha de regressão
+    fig.add_trace(go.Scatter(
+        x=x,
+        y=y_pred,
+        mode='lines',
+        name=f'Regressão Linear (R²={r_squared:.3f})',
+        line=dict(
+            color=COLORS['accent'],
+            width=3,
+            dash='dash'
+        ),
+        hovertemplate='<b>Vento:</b> %{x:.1f} km/h<br><b>Predição:</b> %{y:.2%}<extra></extra>'
+    ))
+    
+    # Adicionar equação da reta
+    equation_text = f'y = {coef[0]:.4f}x + {coef[1]:.4f}<br>R² = {r_squared:.3f}'
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis_title='Velocidade do Vento (km/h)',
+        yaxis_title='Frequência Média de Sintomas Respiratórios',
+        legend=dict(
+            orientation='h',
+            yanchor='bottom',
+            y=1.02,
+            xanchor='right',
+            x=1
+        ),
+        annotations=[
+            dict(
+                text=equation_text,
+                xref='paper', yref='paper',
+                x=0.05, y=0.95,
+                showarrow=False,
+                bgcolor='rgba(255, 255, 255, 0.1)',
+                bordercolor=COLORS['border'],
+                borderwidth=1,
+                borderpad=10,
+                font=dict(size=12, color=COLORS['text'])
+            )
+        ],
+        height=500
+    )
+    
+    # Formatar eixo Y como percentual
+    fig.update_yaxes(tickformat='.0%')
     
     return fig
 
@@ -1905,11 +2135,6 @@ def create_symptoms_layout():
         ]),
         
         html.Div([
-            create_card([dcc.Graph(id='symptom-heatmap-graph')], 
-                       'Heatmap de Sintomas por Diagnóstico (Top 15)')
-        ]),
-        
-        html.Div([
             create_card([dcc.Graph(id='diagnosis-by-symptom-graph')], 
                        'Diagnóstico por Sintoma (Top 10 Sintomas)')
         ]),
@@ -1922,6 +2147,7 @@ def create_symptoms_layout():
 
 
 @app.callback(
+<<<<<<< HEAD
     Output('symptom-heatmap-graph', 'figure'),
     Input('tabs', 'value')
 )
@@ -1993,6 +2219,8 @@ def update_symptom_heatmap(tab):
 
 
 @app.callback(
+=======
+>>>>>>> new-graphs
     Output('diagnosis-by-symptom-graph', 'figure'),
     Input('tabs', 'value')
 )
