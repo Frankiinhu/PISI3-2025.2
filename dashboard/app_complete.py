@@ -1055,8 +1055,6 @@ def create_eda_layout():
                        'Matriz de Correlação: Sintomas x Diagnósticos')
         ]),
         
-<<<<<<< HEAD
-=======
         html.Div([
             create_card([dcc.Graph(id='correlation-matrix-graph')], 
                        'Matriz de Correlação (Top Features)')
@@ -1068,225 +1066,13 @@ def create_eda_layout():
         ]),
         
         html.Div([
+            create_card([dcc.Graph(id='temp-humidity-resp-heatmap')],
+                       'Mapa de Calor: Temperatura x Umidade (Sintomas Respiratórios)')
+        ]),
+        
+        html.Div([
             create_card([dcc.Graph(id='wind-respiratory-scatter')], 
                        'Regressão: Velocidade do Vento vs Sintomas Respiratórios')
-        ]),
-        
->>>>>>> new-graphs
-        # Explorador Interativo de Perfis Climáticos
-        html.Div([
-            html.H4('🔍 Explorador Interativo de Perfis Climáticos', style={
-                'color': COLORS['text'], 
-                'marginTop': '30px',
-                'marginBottom': '20px',
-                'fontSize': '1.4em',
-                'fontWeight': '600',
-                'paddingLeft': '10px'
-            }),
-            html.P('Filtre condições climáticas para observar sintomas e diagnósticos específicos', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '0.95em',
-                'marginBottom': '20px',
-                'paddingLeft': '10px'
-            })
-        ]),
-        
-        # Painel de Filtros Climáticos
-        html.Div([
-            html.H5('⚙️ Filtros de Perfil Climático e Demográfico', style={
-                'color': COLORS['text'],
-                'marginBottom': '20px',
-                'fontSize': '1.2em',
-                'fontWeight': '600'
-            }),
-            
-            # Primeira linha de filtros - Climáticos
-            html.Div([
-                # Temperatura
-                html.Div([
-                    html.Label('🌡️ Temperatura', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='temp-profile-filter',
-                        options=[
-                            {'label': '🔥 Alto (>25°C)', 'value': 'alto'},
-                            {'label': '🌤️ Médio (18-25°C)', 'value': 'medio'},
-                            {'label': '❄️ Baixo (<18°C)', 'value': 'baixo'},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-                
-                # Umidade
-                html.Div([
-                    html.Label('💧 Umidade', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='humidity-profile-filter',
-                        options=[
-                            {'label': '💦 Alto (>0.7)', 'value': 'alto'},
-                            {'label': '💧 Médio (0.4-0.7)', 'value': 'medio'},
-                            {'label': '🏜️ Baixo (<0.4)', 'value': 'baixo'},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-                
-                # Vento
-                html.Div([
-                    html.Label('💨 Vento', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='wind-profile-filter',
-                        options=[
-                            {'label': '🌪️ Alto (>15 km/h)', 'value': 'alto'},
-                            {'label': '🍃 Médio (5-15 km/h)', 'value': 'medio'},
-                            {'label': '🌿 Baixo (<5 km/h)', 'value': 'baixo'},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-                
-                # Tipo de Visualização
-                html.Div([
-                    html.Label('📊 Visualizar', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='view-type-filter',
-                        options=[
-                            {'label': '🩺 Diagnósticos', 'value': 'diagnosticos'},
-                            {'label': '💊 Sintomas (Top 10)', 'value': 'sintomas'}
-                        ],
-                        value='diagnosticos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-            ]),
-            
-            # Segunda linha de filtros - Demográficos
-            html.Div([
-                # Gênero
-                html.Div([
-                    html.Label('👤 Gênero', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='gender-filter',
-                        options=[
-                            {'label': '👨 Masculino', 'value': 1},
-                            {'label': '👩 Feminino', 'value': 0},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '31%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-                
-                # Faixa Etária
-                html.Div([
-                    html.Label('🎂 Faixa Etária', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='age-filter',
-                        options=[
-                            {'label': '👶 Crianças (0-12)', 'value': 'crianca'},
-                            {'label': '🧒 Adolescentes (13-17)', 'value': 'adolescente'},
-                            {'label': '👨 Adultos (18-59)', 'value': 'adulto'},
-                            {'label': '👴 Idosos (60+)', 'value': 'idoso'},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '31%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-            ], style={'marginTop': '10px'}),
-            
-            # Indicador de registros filtrados
-            html.Div(id='filter-stats', style={
-                'marginTop': '15px',
-                'padding': '15px',
-                'backgroundColor': COLORS['background'],
-                'borderRadius': '8px',
-                'borderLeft': f'4px solid {COLORS["accent"]}'
-            })
-            
-        ], style={
-            'marginBottom': '30px',
-            'padding': '25px',
-            'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-            'borderRadius': '15px',
-            'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-            'border': f'1px solid {COLORS["border"]}'
-        }),
-        
-        # Gráficos do Explorador
-        html.Div([
-            create_card([dcc.Graph(id='climate-explorer-graph')], 
-                       'Incidência por Perfil Climático')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='climate-correlation-graph')], 
-                       'Correlação com Condições Climáticas')
         ]),
         
         # Seção: Sintomas vs Diagnóstico (Bivariada)
@@ -1341,11 +1127,6 @@ def create_eda_layout():
                        'Diagnóstico por Sintoma (Top 10 Sintomas)')
         ]),
         
-        html.Div([
-            create_card([dcc.Graph(id='symptom-importance-graph')], 
-                       'Top 15 Sintomas por Importância')
-        ]),
-        
         # ==================== ANÁLISE MULTIVARIADA ====================
         html.Div([
             html.H3('🎯 Análise Multivariada', style={
@@ -1366,18 +1147,231 @@ def create_eda_layout():
             })
         ]),
         
-        # Placeholder para análises multivariadas futuras
+        # Explorador Interativo de Perfis Climáticos
         html.Div([
-            create_card([
+            html.H4('🔍 Explorador Interativo de Perfis Climáticos', style={
+                'color': COLORS['text'], 
+                'marginTop': '30px',
+                'marginBottom': '20px',
+                'fontSize': '1.4em',
+                'fontWeight': '600',
+                'paddingLeft': '10px'
+            }),
+            html.P('Filtre condições climáticas para observar sintomas e diagnósticos específicos', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '0.95em',
+                'marginBottom': '20px',
+                'paddingLeft': '10px'
+            })
+        ]),
+        
+        # Filtros do Explorador
+        html.Div([
+            html.H5('⚙️ Filtros de Perfil Climático e Demográfico', style={
+                'color': COLORS['text'],
+                'marginBottom': '20px',
+                'fontSize': '1.2em',
+                'fontWeight': '600'
+            }),
+            
+            html.Div([
+                # Temperatura
                 html.Div([
-                    html.P('🔮 Análises de PCA, Clustering e outras técnicas multivariadas virão aqui', style={
-                        'color': COLORS['text_secondary'],
-                        'textAlign': 'center',
-                        'padding': '40px',
-                        'fontSize': '1.1em'
-                    })
-                ])
-            ], 'Análises Avançadas')
+                    html.Label('🌡️ Temperatura', style={
+                        'color': COLORS['text'],
+                        'fontWeight': '600',
+                        'display': 'block',
+                        'marginBottom': '8px'
+                    }),
+                    dcc.Dropdown(
+                        id='temp-profile-filter',
+                        options=[
+                            {'label': '🔥 Alto (>26°C)', 'value': 'alto'},
+                            {'label': '🌤️ Médio (16-26°C)', 'value': 'medio'},
+                            {'label': '❄️ Baixo (<16°C)', 'value': 'baixo'},
+                            {'label': '✨ Todos', 'value': 'todos'}
+                        ],
+                        value='todos',
+                        clearable=False,
+                        style={
+                            'color': '#e8eaf6',
+                            'backgroundColor': COLORS['secondary']
+                        },
+                        className='custom-dropdown'
+                    )
+                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
+                
+                # Umidade
+                html.Div([
+                    html.Label('💧 Umidade', style={
+                        'color': COLORS['text'],
+                        'fontWeight': '600',
+                        'display': 'block',
+                        'marginBottom': '8px'
+                    }),
+                    dcc.Dropdown(
+                        id='humidity-profile-filter',
+                        options=[
+                            {'label': '💦 Alto (>0.75)', 'value': 'alto'},
+                            {'label': '💧 Médio (0.55-0.75)', 'value': 'medio'},
+                            {'label': '🏜️ Baixo (<0.55)', 'value': 'baixo'},
+                            {'label': '✨ Todos', 'value': 'todos'}
+                        ],
+                        value='todos',
+                        clearable=False,
+                        style={
+                            'color': '#e8eaf6',
+                            'backgroundColor': COLORS['secondary']
+                        },
+                        className='custom-dropdown'
+                    )
+                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
+                
+                # Vento
+                html.Div([
+                    html.Label('💨 Vento', style={
+                        'color': COLORS['text'],
+                        'fontWeight': '600',
+                        'display': 'block',
+                        'marginBottom': '8px'
+                    }),
+                    dcc.Dropdown(
+                        id='wind-profile-filter',
+                        options=[
+                            {'label': '🌪️ Alto (>15 km/h)', 'value': 'alto'},
+                            {'label': '🍃 Médio (5-15 km/h)', 'value': 'medio'},
+                            {'label': '🌿 Baixo (<5 km/h)', 'value': 'baixo'},
+                            {'label': '✨ Todos', 'value': 'todos'}
+                        ],
+                        value='todos',
+                        clearable=False,
+                        style={
+                            'color': '#e8eaf6',
+                            'backgroundColor': COLORS['secondary']
+                        },
+                        className='custom-dropdown'
+                    )
+                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
+                
+                # Visualizar
+                html.Div([
+                    html.Label('📊 Visualizar', style={
+                        'color': COLORS['text'],
+                        'fontWeight': '600',
+                        'display': 'block',
+                        'marginBottom': '8px'
+                    }),
+                    dcc.Dropdown(
+                        id='view-type-filter',
+                        options=[
+                            {'label': '🩺 Diagnósticos', 'value': 'diagnosticos'},
+                            {'label': '💊 Sintomas (Top 10)', 'value': 'sintomas'}
+                        ],
+                        value='diagnosticos',
+                        clearable=False,
+                        style={
+                            'color': '#e8eaf6',
+                            'backgroundColor': COLORS['secondary']
+                        },
+                        className='custom-dropdown'
+                    )
+                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
+            ]),
+            
+            # Filtros demográficos
+            html.Div([
+                # Gênero
+                html.Div([
+                    html.Label('👤 Gênero', style={
+                        'color': COLORS['text'],
+                        'fontWeight': '600',
+                        'display': 'block',
+                        'marginBottom': '8px'
+                    }),
+                    dcc.Dropdown(
+                        id='gender-filter',
+                        options=[
+                            {'label': '👨 Masculino', 'value': 1},
+                            {'label': '👩 Feminino', 'value': 0},
+                            {'label': '✨ Todos', 'value': 'todos'}
+                        ],
+                        value='todos',
+                        clearable=False,
+                        style={
+                            'color': '#e8eaf6',
+                            'backgroundColor': COLORS['secondary']
+                        },
+                        className='custom-dropdown'
+                    )
+                ], style={'width': '31%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
+                
+                # Faixa Etária
+                html.Div([
+                    html.Label('🎂 Faixa Etária', style={
+                        'color': COLORS['text'],
+                        'fontWeight': '600',
+                        'display': 'block',
+                        'marginBottom': '8px'
+                    }),
+                    dcc.Dropdown(
+                        id='age-filter',
+                        options=[
+                            {'label': '👶 Crianças (0-12)', 'value': 'crianca'},
+                            {'label': '🧒 Adolescentes (13-17)', 'value': 'adolescente'},
+                            {'label': '👨 Adultos (18-59)', 'value': 'adulto'},
+                            {'label': '👴 Idosos (60+)', 'value': 'idoso'},
+                            {'label': '✨ Todos', 'value': 'todos'}
+                        ],
+                        value='todos',
+                        clearable=False,
+                        style={
+                            'color': '#e8eaf6',
+                            'backgroundColor': COLORS['secondary']
+                        },
+                        className='custom-dropdown'
+                    )
+                ], style={'width': '31%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
+            ], style={'marginTop': '10px'}),
+            
+            # Estatísticas do filtro
+            html.Div(id='filter-stats', style={
+                'marginTop': '15px',
+                'padding': '15px',
+                'backgroundColor': COLORS['background'],
+                'borderRadius': '8px',
+                'borderLeft': f'4px solid {COLORS["accent"]}'
+            })
+            
+        ], style={
+            'marginBottom': '30px',
+            'padding': '25px',
+            'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
+            'borderRadius': '15px',
+            'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
+            'border': f'1px solid {COLORS["border"]}'
+        }),
+        
+        # Gráficos do Explorador
+        html.Div([
+            create_card([dcc.Graph(id='climate-explorer-graph')], 
+                       'Incidência por Perfil Climático')
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='climate-correlation-graph')], 
+                       'Correlação com Condições Climáticas')
+        ]),
+        
+        # Distribuição Etária por Temperatura
+        html.Div([
+            create_card([dcc.Graph(id='age-temp-distribution')], 
+                       'Distribuição Etária por Faixa de Temperatura')
+        ]),
+        
+        # Top 15 Sintomas por Importância
+        html.Div([
+            create_card([dcc.Graph(id='symptom-importance-graph')], 
+                       'Top 15 Features por Importância (Modelo de Classificação)')
         ]),
     ])
 
@@ -1441,14 +1435,6 @@ def update_correlation_matrix(tab):
     if tab != 'tab-eda':
         return go.Figure()
     
-<<<<<<< HEAD
-    # Selecionar top features
-    if classifier is not None and hasattr(classifier, 'feature_importances') and classifier.feature_importances is not None:
-        top_features = classifier.feature_importances.head(15).index.tolist()
-        # Adicionar variáveis climáticas
-        features_to_correlate = list(set(top_features + climatic_vars + ['Idade']))
-        features_to_correlate = [f for f in features_to_correlate if f in df_global.columns]
-=======
     # Definir features base na ordem específica
     base_features = ['Idade', 'Gênero', 'Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
     
@@ -1461,7 +1447,6 @@ def update_correlation_matrix(tab):
         # Excluir as features base da seleção
         feature_importance_filtered = classifier.feature_importances[~classifier.feature_importances.index.isin(base_features)]
         top_additional = feature_importance_filtered.head(10).index.tolist()
->>>>>>> new-graphs
     else:
         # Usar sintomas mais frequentes (sem HIV/AIDS e sem features base)
         symptom_cols_filtered = [col for col in symptom_cols 
@@ -1698,6 +1683,117 @@ def update_wind_respiratory_scatter(tab):
     # Formatar eixo Y como percentual
     fig.update_yaxes(tickformat='.0%')
     
+    return fig
+
+
+@app.callback(
+    Output('temp-humidity-resp-heatmap', 'figure'),
+    Input('tabs', 'value')
+)
+def update_temp_humidity_resp_heatmap(tab):
+    """Atualiza heatmap Temperatura x Umidade com frequência média de sintomas respiratórios"""
+    load_data_and_models()
+    if tab != 'tab-eda':
+        return go.Figure()
+
+    # Sintomas respiratórios esperados (ajustar conforme colunas reais)
+    respiratory_symptoms = ['Coriza', 'Tosse', 'Dor de Garganta', 'Congestão Nasal',
+                            'Dificuldade Respiratória', 'Chiado no Peito']
+
+    # Filtrar apenas sintomas existentes
+    available_resp = [s for s in respiratory_symptoms if s in df_global.columns]
+    if not available_resp:
+        fig = go.Figure()
+        fig.add_annotation(text='Nenhum sintoma respiratório encontrado no dataset', xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+                           font=dict(size=14, color=COLORS['text_secondary']))
+        fig.update_layout(plot_bgcolor=COLORS['background'], paper_bgcolor=COLORS['card'])
+        return fig
+
+    df_hm = df_global[["Temperatura (°C)", 'Umidade'] + available_resp].copy()
+    df_hm = df_hm.dropna(subset=["Temperatura (°C)", 'Umidade'])
+
+    # Calcular frequência média de sintomas respiratórios por linha (0-1)
+    df_hm['Resp_Freq'] = df_hm[available_resp].sum(axis=1) / len(available_resp)
+
+    # Definir bins para temperatura e umidade
+    temp_bins = 20
+    hum_bins = 20
+    df_hm['temp_bin'] = pd.cut(df_hm['Temperatura (°C)'], bins=temp_bins)
+    df_hm['hum_bin'] = pd.cut(df_hm['Umidade'], bins=hum_bins)
+
+    # Agrupar e calcular média de Resp_Freq por bin
+    grouped = df_hm.groupby(['temp_bin', 'hum_bin'])['Resp_Freq'].mean().reset_index()
+
+    # Criar matrizes para heatmap (z) e labels (x, y)
+    temp_categories = grouped['temp_bin'].cat.categories if hasattr(grouped['temp_bin'], 'cat') else sorted(grouped['temp_bin'].unique())
+    hum_categories = grouped['hum_bin'].cat.categories if hasattr(grouped['hum_bin'], 'cat') else sorted(grouped['hum_bin'].unique())
+
+    z_matrix = np.zeros((len(hum_categories), len(temp_categories)))
+    z_matrix[:] = np.nan
+
+    # Mapear valores para a matriz (y: umidade, x: temperatura)
+    temp_index = {b: i for i, b in enumerate(temp_categories)}
+    hum_index = {b: i for i, b in enumerate(hum_categories)}
+
+    for _, row in grouped.iterrows():
+        t = row['temp_bin']
+        h = row['hum_bin']
+        v = row['Resp_Freq']
+        if pd.isna(v):
+            continue
+        xi = temp_index.get(t, None)
+        yi = hum_index.get(h, None)
+        if xi is not None and yi is not None:
+            z_matrix[yi, xi] = v
+
+    # Rótulos com checkpoint central (média do bin) ao invés de intervalo
+    x_labels = [f"{int((b.left + b.right) / 2)}" for b in temp_categories]
+    y_labels = [f"{round((b.left + b.right) / 2, 2)}" for b in hum_categories]
+
+    # Criar heatmap com escala de cores mais gradual (zero um pouco mais claro que o fundo)
+    fig = go.Figure(data=go.Heatmap(
+        z=z_matrix,
+        x=x_labels,
+        y=y_labels,
+        colorscale=[
+            [0, "#1F0361"],                  # Início: um pouco mais claro que o fundo
+            [0.15, "#351886"],     # Transição rápida para secundária
+            [0.4, COLORS['primary']],        # Primária
+            [0.65, COLORS['primary']],        # Accent
+            [1, COLORS['accent']]  # Máximo: accent secondary
+        ],
+        colorbar=dict(
+            title='Frequência Média',
+            tickfont=dict(color=COLORS['text'])
+        ),
+        zmin=0,
+        zmax=1,
+        hovertemplate='Temp: %{x}°C<br>Umidade: %{y}<br>Freq. Resp.: %{z:.1%}<extra></extra>'
+    ))
+
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis_title='Temperatura (°C)',
+        yaxis_title='Umidade',
+        height=520,
+        margin=dict(t=60, b=80),
+        xaxis=dict(
+            tickangle=0,           # Sem inclinação
+            tickmode='linear',
+            gridcolor='rgba(255, 255, 255, 0.1)',  # Grade menos opaca
+            showgrid=True,
+            side='bottom'
+        ),
+        yaxis=dict(
+            tickangle=0,           # Sem inclinação
+            tickmode='linear',
+            gridcolor='rgba(255, 255, 255, 0.1)',  # Grade menos opaca
+            showgrid=True
+        )
+    )
+
     return fig
 
 
@@ -2147,80 +2243,6 @@ def create_symptoms_layout():
 
 
 @app.callback(
-<<<<<<< HEAD
-    Output('symptom-heatmap-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_symptom_heatmap(tab):
-    """Atualiza heatmap de sintomas"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    try:
-        # Filtrar HIV/AIDS dos sintomas
-        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
-        
-        # Agrupar sintomas por diagnóstico
-        symptom_by_diagnosis = df_global.groupby('Diagnóstico')[symptom_cols_filtered].sum()
-        
-        # Selecionar top 15 sintomas mais frequentes
-        top_symptoms = symptom_by_diagnosis.sum().sort_values(ascending=False).head(15).index
-        symptom_subset = symptom_by_diagnosis[top_symptoms]
-        
-        # Criar heatmap
-        fig = go.Figure(data=go.Heatmap(
-            z=symptom_subset.T.values,
-            x=symptom_subset.index.tolist(),
-            y=top_symptoms.tolist(),
-            colorscale=[[0, '#0a0e27'], [0.5, '#5559ff'], [1, '#a4a8ff']],
-            colorbar=dict(
-                title=dict(
-                    text='<b>Contagem</b>',
-                    side='right',
-                    font=dict(size=14, color=COLORS['text'])
-                ),
-                tickfont=dict(size=11, color=COLORS['text']),
-                len=0.7,
-                thickness=15
-            ),
-            hovertemplate='<b>Diagnóstico:</b> %{x}<br><b>Sintoma:</b> %{y}<br><b>Contagem:</b> %{z}<extra></extra>',
-            showscale=True
-        ))
-        
-        fig.update_layout(
-            height=650,
-            plot_bgcolor=COLORS['background'],
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Inter, sans-serif", color=COLORS['text'], size=12),
-            xaxis=dict(
-                tickangle=-45,
-                side='bottom',
-                tickfont=dict(size=11, color=COLORS['text']),
-                showgrid=False
-            ),
-            yaxis=dict(
-                side='left',
-                tickfont=dict(size=11, color=COLORS['text']),
-                showgrid=False
-            ),
-            margin=dict(t=30, b=120, l=180, r=120)
-        )
-        
-        return fig
-    except Exception as e:
-        print(f"Erro no heatmap: {e}")
-        return go.Figure().add_annotation(
-            text=f"Erro ao gerar heatmap: {str(e)}",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
-
-
-@app.callback(
-=======
->>>>>>> new-graphs
     Output('diagnosis-by-symptom-graph', 'figure'),
     Input('tabs', 'value')
 )
@@ -2320,33 +2342,88 @@ def update_diagnosis_by_symptom(tab):
     Input('tabs', 'value')
 )
 def update_symptom_importance(tab):
-    """Atualiza gráfico de importância de sintomas"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    if classifier is None or not hasattr(classifier, 'feature_importances') or classifier.feature_importances is None:
-        return go.Figure()
-    
-    top_features = classifier.feature_importances.head(15)
-    
-    fig = px.bar(x=top_features.values, y=top_features.index,
-                 orientation='h',
-                 title='',
-                 color=top_features.values,
-                 color_continuous_scale='Blues')
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Importância',
-        yaxis_title='Feature',
-        showlegend=False,
-        yaxis={'categoryorder': 'total ascending'}
-    )
-    
-    return fig
+    """Atualiza gráfico de importância de features do modelo"""
+    try:
+        load_data_and_models()
+        if tab != 'tab-eda':
+            return go.Figure()
+        
+        # Verificar se há feature importances disponíveis
+        if not has_feature_importances():
+            fig = go.Figure()
+            fig.add_annotation(
+                text='⚠️ Feature importances não disponível.<br>Treine o modelo primeiro.',
+                xref='paper', yref='paper',
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16, color=COLORS['text_secondary']),
+                align='center'
+            )
+            fig.update_layout(
+                plot_bgcolor=COLORS['background'],
+                paper_bgcolor=COLORS['card'],
+                height=400
+            )
+            return fig
+        
+        # Pegar top 15 features
+        top_features = classifier.feature_importances.head(15)
+        
+        # Criar gráfico de barras horizontal
+        fig = go.Figure(data=[
+            go.Bar(
+                x=top_features.values,
+                y=top_features.index,
+                orientation='h',
+                marker=dict(
+                    color=top_features.values,
+                    colorscale=[
+                        [0, COLORS['secondary']],
+                        [0.5, COLORS['primary']],
+                        [1, COLORS['accent']]
+                    ],
+                    showscale=False,
+                    line=dict(color=COLORS['border'], width=1)
+                ),
+                hovertemplate='<b>%{y}</b><br>Importância: %{x:.4f}<extra></extra>'
+            )
+        ])
+        
+        fig.update_layout(
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card'],
+            font_color=COLORS['text'],
+            xaxis_title='Importância',
+            yaxis_title='',
+            showlegend=False,
+            height=500,
+            margin=dict(l=200, r=40, t=40, b=60),
+            yaxis={'categoryorder': 'total ascending'},
+            xaxis=dict(
+                gridcolor='rgba(255, 255, 255, 0.1)',
+                showgrid=True
+            )
+        )
+        
+        return fig
+        
+    except Exception as e:
+        print(f"Erro no callback symptom-importance: {e}")
+        import traceback
+        traceback.print_exc()
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f'Erro ao gerar gráfico: {str(e)}',
+            xref='paper', yref='paper',
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color='#ff6b6b')
+        )
+        fig.update_layout(
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card']
+        )
+        return fig
 
 
 # ==================== CALLBACKS DO EXPLORADOR CLIMÁTICO ====================
@@ -2377,24 +2454,24 @@ def update_climate_explorer(temp_profile, humidity_profile, wind_profile, gender
     
     # Filtro de Temperatura
     if temp_profile == 'alto':
-        df_filtered = df_filtered[df_filtered['Temperatura (°C)'] > 25]
+        df_filtered = df_filtered[df_filtered['Temperatura (°C)'] > 26]
         filter_labels.append('🔥 Temperatura Alta')
     elif temp_profile == 'medio':
-        df_filtered = df_filtered[(df_filtered['Temperatura (°C)'] >= 18) & (df_filtered['Temperatura (°C)'] <= 25)]
+        df_filtered = df_filtered[(df_filtered['Temperatura (°C)'] >= 16) & (df_filtered['Temperatura (°C)'] <= 26)]
         filter_labels.append('🌤️ Temperatura Média')
     elif temp_profile == 'baixo':
-        df_filtered = df_filtered[df_filtered['Temperatura (°C)'] < 18]
+        df_filtered = df_filtered[df_filtered['Temperatura (°C)'] < 16]
         filter_labels.append('❄️ Temperatura Baixa')
     
     # Filtro de Umidade
     if humidity_profile == 'alto':
-        df_filtered = df_filtered[df_filtered['Umidade'] > 0.7]
+        df_filtered = df_filtered[df_filtered['Umidade'] > 0.75]
         filter_labels.append('💦 Umidade Alta')
     elif humidity_profile == 'medio':
-        df_filtered = df_filtered[(df_filtered['Umidade'] >= 0.4) & (df_filtered['Umidade'] <= 0.7)]
+        df_filtered = df_filtered[(df_filtered['Umidade'] >= 0.55) & (df_filtered['Umidade'] <= 0.75)]
         filter_labels.append('💧 Umidade Média')
     elif humidity_profile == 'baixo':
-        df_filtered = df_filtered[df_filtered['Umidade'] < 0.4]
+        df_filtered = df_filtered[df_filtered['Umidade'] < 0.55]
         filter_labels.append('🏜️ Umidade Baixa')
     
     # Filtro de Vento
