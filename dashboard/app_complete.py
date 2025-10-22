@@ -1,9 +1,9 @@
 """
-Dashboard Principal - Nimbusvita (Versão Completa com Callbacks)
-Análise Exploratória de Dados e Predição de Doenças Relacionadas ao Clima
+Dashboard Principal - NimbusVita (Versão Completa com Callbacks)
+Análise Exploratória de Doenças Relacionadas ao Clima
 """
 import dash
-from dash import dcc, html, Input, Output, State
+from dash import dcc, html, Input, Output
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 import sys
 import os
+from typing import Tuple
 
 # Adicionar diretório src ao path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -45,11 +46,12 @@ def load_data_and_models():
     
     # Obter feature names
     feature_dict = loader.get_feature_names()
-    symptom_cols = feature_dict['symptoms']
-    diagnosis_cols = feature_dict['diagnosis']
-    climatic_vars = feature_dict['climatic']
+    symptom_cols = feature_dict.get('symptoms', [])
+    # Compatibilidade: alguns loaders usam 'target' ao invés de 'diagnosis'
+    diagnosis_cols = feature_dict.get('diagnosis', []) or [feature_dict.get('target', 'Diagnóstico')]
+    climatic_vars = feature_dict.get('climatic', [])
     
-    # Carregar modelos localmente (fallback). Prefer usar API for predictions.
+    # Carregar modelos localmente (fallback). Preferir uso da API quando disponível.
     print("Carregando modelos locais (fallback)...")
     classifier = DiagnosisClassifier()
     clusterer = DiseaseClusterer()
@@ -68,22 +70,51 @@ def load_data_and_models():
     except Exception as e:
         print(f"⚠ Clusterizador local não carregado: {e}")
 
-    # API base URL (env override allowed)
-    global API_BASE
-    API_BASE = os.environ.get('VITANIMBUS_API', 'http://127.0.0.1:5000')
-
 # Funções auxiliares de verificação
 def is_classifier_available():
     """Verifica se o classifier está disponível e carregado"""
     return classifier is not None and hasattr(classifier, 'model') and classifier.model is not None
 
+
 def has_feature_importances():
     """Verifica se o classifier tem feature importances"""
     return classifier is not None and hasattr(classifier, 'feature_importances') and classifier.feature_importances is not None
 
+
+def get_cluster_feature_frame() -> pd.DataFrame:
+    """Retorna DataFrame ordenado com as features usadas pelo clusterizador."""
+    if clusterer is None or getattr(clusterer, 'feature_names', None) is None:
+        raise ValueError('Clusterizador indisponível ou sem feature names; execute o treinamento e carregue o modelo salvo.')
+
+    if df_global is None:
+        raise ValueError('Dados não carregados; garanta que load_data_and_models() foi executado.')
+
+    numeric_df = df_global.select_dtypes(include=[np.number])
+    missing = [col for col in clusterer.feature_names if col not in numeric_df.columns]
+    if missing:
+        missing_str = ', '.join(missing)
+        raise ValueError(f'Colunas ausentes no dataset atual para reconstruir os clusters: {missing_str}')
+
+    return numeric_df.loc[:, clusterer.feature_names]
+
+
+def get_cluster_features_and_labels() -> Tuple[pd.DataFrame, pd.Series]:
+    """Retorna as features numéricas alinhadas e os clusters previstos."""
+    if clusterer is None or getattr(clusterer, 'model', None) is None:
+        raise ValueError('Clusterizador não carregado; execute o treinamento antes de gerar visualizações.')
+
+    feature_frame = get_cluster_feature_frame()
+
+    try:
+        labels = clusterer.predict_cluster(feature_frame.values)
+    except ValueError as exc:
+        raise ValueError(f'Não foi possível gerar previsões de cluster: {exc}') from exc
+
+    return feature_frame, pd.Series(labels, index=feature_frame.index, name='Cluster')
+
 # Inicializar app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
-app.title = "Nimbusvita - Análise de Doenças Climáticas"
+app.title = "NimbusVita - Análise de Doenças Climáticas"
 
 # CSS customizado para melhorar a aparência
 app.index_string = '''
@@ -442,6 +473,25 @@ COLORS = {
     'border': '#2d3250'
 }
 
+def metrics_unavailable_figure(message: str = 'Execute o treinamento e salve o modelo para visualizar as métricas registradas.') -> go.Figure:
+    """Cria figura padrão quando as métricas não estão disponíveis."""
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref='paper', yref='paper',
+        x=0.5, y=0.5,
+        showarrow=False,
+        font=dict(size=16, color=COLORS['text'], family='Inter, sans-serif')
+    )
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font=dict(color=COLORS['text'], family='Inter, sans-serif'),
+        margin=dict(t=40, b=40, l=40, r=40),
+        height=400
+    )
+    return fig
+
 # Layout principal
 app.layout = html.Div(style={
     'backgroundColor': COLORS['background'], 
@@ -458,7 +508,7 @@ app.layout = html.Div(style={
         'borderBottom': f'3px solid {COLORS["accent"]}'
     }, children=[
         html.Div(style={'maxWidth': '1400px', 'margin': '0 auto'}, children=[
-            html.H1('Nimbusvita', 
+            html.H1('NimbusVita', 
                     style={
                         'color': 'white', 
                         'textAlign': 'center', 
@@ -468,7 +518,7 @@ app.layout = html.Div(style={
                         'letterSpacing': '1px',
                         'textShadow': '2px 2px 4px rgba(0,0,0,0.3)'
                     }),
-            html.P('Weather Related Disease Prediction',
+            html.P('Weather Related Disease Analysis',
                    style={
                        'color': 'rgba(255,255,255,0.95)', 
                        'textAlign': 'center', 
@@ -476,7 +526,7 @@ app.layout = html.Div(style={
                        'fontSize': '1.3em',
                        'fontWeight': '500'
                    }),
-            html.P('Análise Exploratória de Dados e Predição de Doenças Relacionadas ao Clima',
+            html.P('Análise Exploratória de Doenças Relacionadas ao Clima',
                    style={
                        'color': 'rgba(255,255,255,0.85)', 
                        'textAlign': 'center', 
@@ -552,25 +602,6 @@ app.layout = html.Div(style={
                         'borderBottom': 'none',
                         'borderRadius': '8px 8px 0 0'
                     }),
-            dcc.Tab(label='Predição', value='tab-prediction', 
-                    style={
-                        'color': COLORS['text_secondary'], 
-                        'backgroundColor': 'transparent',
-                        'border': 'none',
-                        'padding': '15px 30px',
-                        'fontSize': '1em',
-                        'fontWeight': '500'
-                    },
-                    selected_style={
-                        'color': COLORS['accent'], 
-                        'backgroundColor': COLORS['card'], 
-                        'fontWeight': '600',
-                        'borderTop': f'3px solid {COLORS["accent"]}',
-                        'borderLeft': 'none',
-                        'borderRight': 'none',
-                        'borderBottom': 'none',
-                        'borderRadius': '8px 8px 0 0'
-                    }),
             dcc.Tab(label='Pipeline de Treinamento', value='tab-pipeline', 
                     style={
                         'color': COLORS['text_secondary'], 
@@ -610,8 +641,6 @@ def render_content(tab):
         return create_eda_layout()
     elif tab == 'tab-ml':
         return create_ml_layout()
-    elif tab == 'tab-prediction':
-        return create_prediction_layout()
     elif tab == 'tab-pipeline':
         return create_pipeline_layout()
 
@@ -1055,8 +1084,6 @@ def create_eda_layout():
                        'Matriz de Correlação: Sintomas x Diagnósticos')
         ]),
         
-<<<<<<< HEAD
-=======
         html.Div([
             create_card([dcc.Graph(id='correlation-matrix-graph')], 
                        'Matriz de Correlação (Top Features)')
@@ -1072,7 +1099,6 @@ def create_eda_layout():
                        'Regressão: Velocidade do Vento vs Sintomas Respiratórios')
         ]),
         
->>>>>>> new-graphs
         # Explorador Interativo de Perfis Climáticos
         html.Div([
             html.H4('🔍 Explorador Interativo de Perfis Climáticos', style={
@@ -1441,14 +1467,6 @@ def update_correlation_matrix(tab):
     if tab != 'tab-eda':
         return go.Figure()
     
-<<<<<<< HEAD
-    # Selecionar top features
-    if classifier is not None and hasattr(classifier, 'feature_importances') and classifier.feature_importances is not None:
-        top_features = classifier.feature_importances.head(15).index.tolist()
-        # Adicionar variáveis climáticas
-        features_to_correlate = list(set(top_features + climatic_vars + ['Idade']))
-        features_to_correlate = [f for f in features_to_correlate if f in df_global.columns]
-=======
     # Definir features base na ordem específica
     base_features = ['Idade', 'Gênero', 'Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
     
@@ -1461,7 +1479,6 @@ def update_correlation_matrix(tab):
         # Excluir as features base da seleção
         feature_importance_filtered = classifier.feature_importances[~classifier.feature_importances.index.isin(base_features)]
         top_additional = feature_importance_filtered.head(10).index.tolist()
->>>>>>> new-graphs
     else:
         # Usar sintomas mais frequentes (sem HIV/AIDS e sem features base)
         symptom_cols_filtered = [col for col in symptom_cols 
@@ -1659,8 +1676,8 @@ def update_wind_respiratory_scatter(tab):
             color=COLORS['accent'],
             width=3,
             dash='dash'
-        ),
-        hovertemplate='<b>Vento:</b> %{x:.1f} km/h<br><b>Predição:</b> %{y:.2%}<extra></extra>'
+    ),
+    hovertemplate='<b>Vento:</b> %{x:.1f} km/h<br><b>Taxa estimada:</b> %{y:.2%}<extra></extra>'
     ))
     
     # Adicionar equação da reta
@@ -2147,80 +2164,6 @@ def create_symptoms_layout():
 
 
 @app.callback(
-<<<<<<< HEAD
-    Output('symptom-heatmap-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_symptom_heatmap(tab):
-    """Atualiza heatmap de sintomas"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    try:
-        # Filtrar HIV/AIDS dos sintomas
-        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
-        
-        # Agrupar sintomas por diagnóstico
-        symptom_by_diagnosis = df_global.groupby('Diagnóstico')[symptom_cols_filtered].sum()
-        
-        # Selecionar top 15 sintomas mais frequentes
-        top_symptoms = symptom_by_diagnosis.sum().sort_values(ascending=False).head(15).index
-        symptom_subset = symptom_by_diagnosis[top_symptoms]
-        
-        # Criar heatmap
-        fig = go.Figure(data=go.Heatmap(
-            z=symptom_subset.T.values,
-            x=symptom_subset.index.tolist(),
-            y=top_symptoms.tolist(),
-            colorscale=[[0, '#0a0e27'], [0.5, '#5559ff'], [1, '#a4a8ff']],
-            colorbar=dict(
-                title=dict(
-                    text='<b>Contagem</b>',
-                    side='right',
-                    font=dict(size=14, color=COLORS['text'])
-                ),
-                tickfont=dict(size=11, color=COLORS['text']),
-                len=0.7,
-                thickness=15
-            ),
-            hovertemplate='<b>Diagnóstico:</b> %{x}<br><b>Sintoma:</b> %{y}<br><b>Contagem:</b> %{z}<extra></extra>',
-            showscale=True
-        ))
-        
-        fig.update_layout(
-            height=650,
-            plot_bgcolor=COLORS['background'],
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Inter, sans-serif", color=COLORS['text'], size=12),
-            xaxis=dict(
-                tickangle=-45,
-                side='bottom',
-                tickfont=dict(size=11, color=COLORS['text']),
-                showgrid=False
-            ),
-            yaxis=dict(
-                side='left',
-                tickfont=dict(size=11, color=COLORS['text']),
-                showgrid=False
-            ),
-            margin=dict(t=30, b=120, l=180, r=120)
-        )
-        
-        return fig
-    except Exception as e:
-        print(f"Erro no heatmap: {e}")
-        return go.Figure().add_annotation(
-            text=f"Erro ao gerar heatmap: {str(e)}",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
-
-
-@app.callback(
-=======
->>>>>>> new-graphs
     Output('diagnosis-by-symptom-graph', 'figure'),
     Input('tabs', 'value')
 )
@@ -2691,6 +2634,18 @@ def create_ml_layout():
                            'Visualização de Clusters 3D (Variáveis Climáticas)')
             ], style={'width': '100%', 'padding': '10px'}),
         ]),
+
+        html.Div([
+            html.Div([
+                create_card([dcc.Graph(id='cluster-diagnosis-stacked')], 
+                           'Distribuição de Diagnósticos por Cluster (barras empilhadas)')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+
+            html.Div([
+                create_card([dcc.Graph(id='cluster-symptoms-stacked')], 
+                           'Principais Sintomas por Cluster (barras empilhadas)')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+        ]),
         
         html.Div([
             create_card([dcc.Graph(id='classification-performance-graph')], 
@@ -2822,59 +2777,28 @@ def update_model_metrics(tab):
             ], style={'marginBottom': '20px'})
         ])
     else:
-        # Se não houver métricas, calcular agora
-        try:
-            X = df_global[classifier.feature_names]
-            y_true = df_global['Diagnóstico']
-            y_pred = classifier.predict(X)
-            
-            from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-            
-            accuracy = accuracy_score(y_true, y_pred)
-            precision = precision_score(y_true, y_pred, average='weighted', zero_division=0)
-            recall = recall_score(y_true, y_pred, average='weighted', zero_division=0)
-            f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
-            
-            return html.Div([
-                html.Div([
-                    html.Div([
-                        html.Div([
-                            html.Div('🎯', style={'fontSize': '2em', 'marginBottom': '10px'}),
-                            html.H4('Acurácia', style={'color': COLORS['text_secondary'], 'margin': '0', 'fontSize': '0.85em', 'textTransform': 'uppercase'}),
-                            html.H2(f"{accuracy*100:.2f}%", style={'color': COLORS['success'], 'margin': '10px 0 0 0', 'fontSize': '2em', 'fontWeight': '700'}),
-                        ], style={'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)', 'padding': '25px', 'borderRadius': '12px', 'textAlign': 'center', 'boxShadow': '0 4px 15px rgba(0,0,0,0.3)', 'border': f'1px solid {COLORS["border"]}'})
-                    ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px'}),
-                    
-                    html.Div([
-                        html.Div([
-                            html.Div('📊', style={'fontSize': '2em', 'marginBottom': '10px'}),
-                            html.H4('Precisão', style={'color': COLORS['text_secondary'], 'margin': '0', 'fontSize': '0.85em', 'textTransform': 'uppercase'}),
-                            html.H2(f"{precision*100:.2f}%", style={'color': COLORS['primary'], 'margin': '10px 0 0 0', 'fontSize': '2em', 'fontWeight': '700'}),
-                        ], style={'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)', 'padding': '25px', 'borderRadius': '12px', 'textAlign': 'center', 'boxShadow': '0 4px 15px rgba(0,0,0,0.3)', 'border': f'1px solid {COLORS["border"]}'})
-                    ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px'}),
-                    
-                    html.Div([
-                        html.Div([
-                            html.Div('🔍', style={'fontSize': '2em', 'marginBottom': '10px'}),
-                            html.H4('Recall', style={'color': COLORS['text_secondary'], 'margin': '0', 'fontSize': '0.85em', 'textTransform': 'uppercase'}),
-                            html.H2(f"{recall*100:.2f}%", style={'color': COLORS['accent'], 'margin': '10px 0 0 0', 'fontSize': '2em', 'fontWeight': '700'}),
-                        ], style={'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)', 'padding': '25px', 'borderRadius': '12px', 'textAlign': 'center', 'boxShadow': '0 4px 15px rgba(0,0,0,0.3)', 'border': f'1px solid {COLORS["border"]}'})
-                    ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px'}),
-                    
-                    html.Div([
-                        html.Div([
-                            html.Div('⚡', style={'fontSize': '2em', 'marginBottom': '10px'}),
-                            html.H4('F1-Score', style={'color': COLORS['text_secondary'], 'margin': '0', 'fontSize': '0.85em', 'textTransform': 'uppercase'}),
-                            html.H2(f"{f1*100:.2f}%", style={'color': COLORS['warning'], 'margin': '10px 0 0 0', 'fontSize': '2em', 'fontWeight': '700'}),
-                        ], style={'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)', 'padding': '25px', 'borderRadius': '12px', 'textAlign': 'center', 'boxShadow': '0 4px 15px rgba(0,0,0,0.3)', 'border': f'1px solid {COLORS["border"]}'})
-                    ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px'}),
-                ])
-            ])
-        except Exception as e:
-            return html.Div([
-                html.P(f'Não foi possível calcular as métricas: {str(e)}', 
-                      style={'color': COLORS['text_secondary'], 'textAlign': 'center'})
-            ])
+        return html.Div([
+            html.Div([
+                html.Div('ℹ️', style={'fontSize': '2em', 'marginBottom': '10px'}),
+                html.H3('Métricas indisponíveis', style={
+                    'color': COLORS['text'],
+                    'marginBottom': '10px',
+                    'fontSize': '1.2em',
+                    'fontWeight': '600'
+                }),
+                html.P(
+                    'Execute o treinamento e salve o modelo para visualizar as métricas registradas.',
+                    style={'color': COLORS['text_secondary'], 'fontSize': '1em'}
+                )
+            ], style={
+                'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
+                'padding': '30px',
+                'borderRadius': '15px',
+                'textAlign': 'center',
+                'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
+                'border': f'1px solid {COLORS["border"]}'
+            })
+        ])
 
 
 @app.callback(
@@ -2888,22 +2812,10 @@ def update_metrics_bar_chart(tab):
         return go.Figure()
     
     try:
-        # Obter ou calcular métricas
-        if hasattr(classifier, 'metrics') and classifier.metrics:
-            metrics = classifier.metrics
-        else:
-            X = df_global[classifier.feature_names]
-            y_true = df_global['Diagnóstico']
-            y_pred = classifier.predict(X)
-            
-            from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-            
-            metrics = {
-                'accuracy': accuracy_score(y_true, y_pred),
-                'precision': precision_score(y_true, y_pred, average='weighted', zero_division=0),
-                'recall': recall_score(y_true, y_pred, average='weighted', zero_division=0),
-                'f1_score': f1_score(y_true, y_pred, average='weighted', zero_division=0)
-            }
+        # Obter métricas pré-calculadas
+        metrics = getattr(classifier, 'metrics', None)
+        if not metrics:
+            return metrics_unavailable_figure()
         
         # Preparar dados
         metric_names = ['Acurácia', 'Precisão', 'Recall', 'F1-Score']
@@ -3009,22 +2921,10 @@ def update_metrics_radar_chart(tab):
         return go.Figure()
     
     try:
-        # Obter ou calcular métricas
-        if hasattr(classifier, 'metrics') and classifier.metrics:
-            metrics = classifier.metrics
-        else:
-            X = df_global[classifier.feature_names]
-            y_true = df_global['Diagnóstico']
-            y_pred = classifier.predict(X)
-            
-            from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-            
-            metrics = {
-                'accuracy': accuracy_score(y_true, y_pred),
-                'precision': precision_score(y_true, y_pred, average='weighted', zero_division=0),
-                'recall': recall_score(y_true, y_pred, average='weighted', zero_division=0),
-                'f1_score': f1_score(y_true, y_pred, average='weighted', zero_division=0)
-            }
+        # Obter métricas pré-calculadas
+        metrics = getattr(classifier, 'metrics', None)
+        if not metrics:
+            return metrics_unavailable_figure()
         
         # Preparar dados para gráfico radar
         categories = ['Acurácia', 'Precisão', 'Recall', 'F1-Score']
@@ -3112,12 +3012,7 @@ def update_accuracy_gauge(tab):
         if hasattr(classifier, 'metrics') and classifier.metrics:
             accuracy = classifier.metrics['accuracy'] * 100
         else:
-            X = df_global[classifier.feature_names]
-            y_true = df_global['Diagnóstico']
-            y_pred = classifier.predict(X)
-            
-            from sklearn.metrics import accuracy_score
-            accuracy = accuracy_score(y_true, y_pred) * 100
+            return metrics_unavailable_figure()
         
         # Criar gauge
         fig = go.Figure(go.Indicator(
@@ -3192,18 +3087,7 @@ def update_metrics_comparison_line(tab):
         if hasattr(classifier, 'metrics') and classifier.metrics:
             metrics = classifier.metrics
         else:
-            X = df_global[classifier.feature_names]
-            y_true = df_global['Diagnóstico']
-            y_pred = classifier.predict(X)
-            
-            from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-            
-            metrics = {
-                'accuracy': accuracy_score(y_true, y_pred),
-                'precision': precision_score(y_true, y_pred, average='weighted', zero_division=0),
-                'recall': recall_score(y_true, y_pred, average='weighted', zero_division=0),
-                'f1_score': f1_score(y_true, y_pred, average='weighted', zero_division=0)
-            }
+            return metrics_unavailable_figure()
         
         # Simular evolução das métricas (você pode substituir por dados reais de treinamento)
         epochs = list(range(1, 11))  # 10 épocas simuladas
@@ -3367,13 +3251,25 @@ def update_feature_importance(tab):
 def update_cluster_visualization_2d(tab):
     """Atualiza visualização de clusters 2D"""
     load_data_and_models()
-    if tab != 'tab-ml' or clusterer.labels_ is None:
+    if tab != 'tab-ml':
         return go.Figure()
     
-    # Preparar dados para visualização
-    X_scaled = clusterer.scaler.transform(
-        df_global.select_dtypes(include=[np.number]).drop('Diagnóstico', axis=1, errors='ignore')
-    )
+    try:
+        feature_frame, cluster_labels = get_cluster_features_and_labels()
+    except ValueError as exc:
+        return go.Figure().add_annotation(
+            text=f'Não foi possível gerar a visualização: {exc}',
+            xref='paper', yref='paper', x=0.5, y=0.5,
+            showarrow=False, font=dict(size=14, color=COLORS['text'])
+        )
+
+    X_scaled = clusterer.scaler.transform(feature_frame)
+
+    if X_scaled.shape[0] != len(cluster_labels):
+        min_len = min(X_scaled.shape[0], len(cluster_labels))
+        feature_frame = feature_frame.iloc[:min_len]
+        cluster_labels = cluster_labels.iloc[:min_len]
+        X_scaled = X_scaled[:min_len]
     
     # PCA para 2D
     from sklearn.decomposition import PCA
@@ -3384,12 +3280,17 @@ def update_cluster_visualization_2d(tab):
     plot_df = pd.DataFrame({
         'PC1': X_pca[:, 0],
         'PC2': X_pca[:, 1],
-        'Cluster': clusterer.labels_.astype(str),
-        'Diagnóstico': df_global['Diagnóstico'].values
-    })
+        'Cluster': cluster_labels.astype(str).values
+    }, index=feature_frame.index)
+
+    hover_fields = []
+    if 'Diagnóstico' in df_global.columns:
+        diag_series = df_global.loc[plot_df.index, 'Diagnóstico'].astype(str)
+        plot_df['Diagnóstico'] = diag_series.values
+        hover_fields.append('Diagnóstico')
     
     fig = px.scatter(plot_df, x='PC1', y='PC2', color='Cluster',
-                    hover_data=['Diagnóstico'],
+                    hover_data=hover_fields or None,
                     title='',
                     color_discrete_sequence=px.colors.qualitative.Set3)
     
@@ -3412,13 +3313,25 @@ def update_cluster_visualization_2d(tab):
 def update_cluster_pca_3d(tab):
     """Atualiza visualização de clusters em 3D com PCA"""
     load_data_and_models()
-    if tab != 'tab-ml' or clusterer.labels_ is None:
+    if tab != 'tab-ml':
         return go.Figure()
     
-    # Preparar dados para visualização
-    X_scaled = clusterer.scaler.transform(
-        df_global.select_dtypes(include=[np.number]).drop('Diagnóstico', axis=1, errors='ignore')
-    )
+    try:
+        feature_frame, cluster_labels = get_cluster_features_and_labels()
+    except ValueError as exc:
+        return go.Figure().add_annotation(
+            text=f'Não foi possível gerar a visualização: {exc}',
+            xref='paper', yref='paper', x=0.5, y=0.5,
+            showarrow=False, font=dict(size=14, color=COLORS['text'])
+        )
+
+    X_scaled = clusterer.scaler.transform(feature_frame)
+
+    if X_scaled.shape[0] != len(cluster_labels):
+        min_len = min(X_scaled.shape[0], len(cluster_labels))
+        feature_frame = feature_frame.iloc[:min_len]
+        cluster_labels = cluster_labels.iloc[:min_len]
+        X_scaled = X_scaled[:min_len]
     
     # PCA para 3D
     from sklearn.decomposition import PCA
@@ -3430,9 +3343,14 @@ def update_cluster_pca_3d(tab):
         'PC1': X_pca[:, 0],
         'PC2': X_pca[:, 1],
         'PC3': X_pca[:, 2],
-        'Cluster': clusterer.labels_.astype(str),
-        'Diagnóstico': df_global['Diagnóstico'].values
-    })
+        'Cluster': cluster_labels.astype(str).values
+    }, index=feature_frame.index)
+
+    hover_fields = []
+    if 'Diagnóstico' in df_global.columns:
+        diag_series = df_global.loc[plot_df.index, 'Diagnóstico'].astype(str)
+        plot_df['Diagnóstico'] = diag_series.values
+        hover_fields.append('Diagnóstico')
     
     fig = px.scatter_3d(
         plot_df, 
@@ -3440,7 +3358,7 @@ def update_cluster_pca_3d(tab):
         y='PC2', 
         z='PC3',
         color='Cluster',
-        hover_data=['Diagnóstico'],
+        hover_data=hover_fields or None,
         title='',
         color_discrete_sequence=px.colors.qualitative.Set3,
         labels={
@@ -3482,18 +3400,64 @@ def update_cluster_pca_3d(tab):
 def update_cluster_visualization_3d(tab):
     """Atualiza visualização de clusters em 3D com variáveis climáticas"""
     load_data_and_models()
-    if tab != 'tab-ml' or clusterer.labels_ is None:
+    if tab != 'tab-ml':
         return go.Figure()
-    
-    # Criar DataFrame para plotar com as 3 variáveis climáticas
-    plot_df = pd.DataFrame({
-        'Temperatura (°C)': df_global['Temperatura (°C)'],
-        'Umidade': df_global['Umidade'],
-        'Velocidade do Vento (km/h)': df_global['Velocidade do Vento (km/h)'],
-        'Cluster': clusterer.labels_.astype(str),
-        'Diagnóstico': df_global['Diagnóstico'].values,
-        'Idade': df_global['Idade']
-    })
+
+    if df_global is None:
+        return go.Figure().add_annotation(
+            text='Dados indisponíveis para gerar o gráfico 3D.',
+            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+    required_cols = [
+        'Temperatura (°C)',
+        'Umidade',
+        'Velocidade do Vento (km/h)',
+        'Diagnóstico',
+        'Idade'
+    ]
+
+    missing_cols = [col for col in required_cols if col not in df_global.columns]
+    if missing_cols:
+        missing_str = ', '.join(missing_cols)
+        return go.Figure().add_annotation(
+            text=f'Colunas ausentes para o gráfico 3D: {missing_str}',
+            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+    try:
+        feature_frame, labels = get_cluster_features_and_labels()
+    except ValueError as exc:
+        return go.Figure().add_annotation(
+            text=f'Erro ao carregar clusters: {exc}',
+            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+    plot_df = df_global.loc[feature_frame.index, required_cols].copy()
+    plot_df = plot_df.dropna()
+    if plot_df.empty:
+        return go.Figure().add_annotation(
+            text='Nenhum dado válido para exibir no gráfico 3D.',
+            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+    # Remover diagnósticos H8 e alinhar índices com rótulos
+    mask = plot_df['Diagnóstico'].astype(str).str.upper() != 'H8'
+    plot_df = plot_df[mask]
+    if plot_df.empty:
+        return go.Figure().add_annotation(
+            text='Após remover H8, não há dados suficientes para o gráfico 3D.',
+            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+    labels = labels.loc[plot_df.index].astype(str)
+    plot_df['Cluster'] = labels
+    plot_df['Diagnóstico'] = plot_df['Diagnóstico'].astype(str)
     
     fig = px.scatter_3d(
         plot_df, 
@@ -3528,6 +3492,181 @@ def update_cluster_visualization_3d(tab):
 
 
 @app.callback(
+    Output('cluster-diagnosis-stacked', 'figure'),
+    Input('tabs', 'value')
+)
+def update_cluster_diagnosis_stacked(tab):
+    """Proporção de diagnósticos por cluster (barras empilhadas)"""
+    load_data_and_models()
+    if tab != 'tab-ml':
+        return go.Figure()
+
+    if df_global is None:
+        return go.Figure().add_annotation(
+            text='Dados indisponíveis para gerar a proporção por diagnóstico.',
+            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+    try:
+        if 'Diagnóstico' not in df_global.columns:
+            return go.Figure().add_annotation(
+                text='Coluna "Diagnóstico" não encontrada no dataset', xref='paper', yref='paper',
+                x=0.5, y=0.5, showarrow=False, font=dict(size=14, color=COLORS['text'])
+            )
+
+        _, labels = get_cluster_features_and_labels()
+        diag = df_global.loc[labels.index, 'Diagnóstico'].astype(str)
+
+        # Remover diagnósticos inválidos e alinhar rótulos
+        valid_mask = diag.str.upper() != 'H8'
+        diag = diag[valid_mask]
+        labels = labels.loc[diag.index].astype(str)
+
+        if diag.empty:
+            return go.Figure().add_annotation(
+                text='Nenhum diagnóstico válido para compor o gráfico.',
+                xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color=COLORS['text'])
+            )
+
+        tmp = pd.DataFrame({'Cluster': labels, 'Diagnóstico': diag})
+
+        # Proporção por diagnóstico dentro de cada cluster
+        counts = tmp.groupby(['Cluster', 'Diagnóstico']).size().reset_index(name='count')
+        total_per_cluster = counts.groupby('Cluster')['count'].transform('sum')
+        counts['Proporção'] = counts['count'] / total_per_cluster
+
+        # Ordenação dos clusters por código
+        counts['Cluster_ord'] = pd.to_numeric(counts['Cluster'], errors='coerce')
+        counts = counts.sort_values(['Cluster_ord', 'Diagnóstico'])
+        cluster_order = sorted(counts['Cluster'].unique(), key=lambda x: pd.to_numeric(x, errors='coerce'))
+
+        fig = px.bar(
+            counts,
+            x='Proporção',
+            y='Cluster',
+            color='Diagnóstico',
+            orientation='h',
+            barmode='stack',
+            color_discrete_sequence=px.colors.qualitative.Set3,
+            title=''
+        )
+
+        fig.update_layout(
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card'],
+            font_color=COLORS['text'],
+            xaxis=dict(title='Proporção', tickformat='.0%', gridcolor=COLORS['border']),
+            yaxis=dict(title='Cluster', categoryorder='array', categoryarray=cluster_order),
+            height=500,
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+            margin=dict(t=40, b=60, l=80, r=40)
+        )
+
+        return fig
+    except Exception as e:
+        return go.Figure().add_annotation(
+            text=f'Erro ao gerar gráfico: {e}', xref='paper', yref='paper',
+            x=0.5, y=0.5, showarrow=False, font=dict(size=14, color=COLORS['text'])
+        )
+
+
+@app.callback(
+    Output('cluster-symptoms-stacked', 'figure'),
+    Input('tabs', 'value')
+)
+def update_cluster_symptoms_stacked(tab):
+    """Proporção dos principais sintomas por cluster (barras empilhadas)"""
+    load_data_and_models()
+    if tab != 'tab-ml':
+        return go.Figure()
+
+    if df_global is None:
+        return go.Figure().add_annotation(
+            text='Dados indisponíveis para gerar a proporção de sintomas.',
+            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+    try:
+        # Filtrar sintomas (remover HIV/AIDS) e selecionar top-N
+        sympts = [c for c in symptom_cols if 'HIV' not in c.upper() and 'AIDS' not in c.upper()]
+        if not sympts:
+            return go.Figure().add_annotation(
+                text='Nenhuma coluna de sintoma disponível', xref='paper', yref='paper',
+                x=0.5, y=0.5, showarrow=False, font=dict(size=14, color=COLORS['text'])
+            )
+
+        top_n = 8
+        missing_symptoms = [col for col in sympts if col not in df_global.columns]
+        if missing_symptoms:
+            missing_str = ', '.join(missing_symptoms)
+            return go.Figure().add_annotation(
+                text=f'Colunas de sintomas ausentes: {missing_str}',
+                xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color=COLORS['text'])
+            )
+
+        _, labels = get_cluster_features_and_labels()
+        df_tmp = df_global.loc[labels.index, sympts].copy()
+        df_tmp = df_tmp.dropna(how='all')
+        if df_tmp.empty:
+            return go.Figure().add_annotation(
+                text='Nenhum dado válido de sintomas para exibir.',
+                xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color=COLORS['text'])
+            )
+
+        labels = labels.loc[df_tmp.index]
+        symptom_totals = df_tmp.sum().sort_values(ascending=False)
+        top_symptoms = symptom_totals.head(top_n).index.tolist()
+        if not top_symptoms:
+            return go.Figure().add_annotation(
+                text='Nenhum sintoma disponível após filtragem.',
+                xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color=COLORS['text'])
+            )
+
+        df_tmp = df_tmp[top_symptoms].copy()
+        df_tmp['Cluster'] = labels.astype(str)
+
+        means = df_tmp.groupby('Cluster')[top_symptoms].mean().reset_index()
+        long_df = means.melt(id_vars='Cluster', var_name='Sintoma', value_name='Proporção')
+
+        # Nomes amigáveis
+        long_df['Sintoma'] = long_df['Sintoma'].apply(lambda s: s.replace('_', ' ').title())
+
+        fig = px.bar(
+            long_df,
+            x='Proporção',
+            y='Cluster',
+            color='Sintoma',
+            orientation='h',
+            barmode='stack',
+            color_discrete_sequence=px.colors.qualitative.Set3,
+            title=''
+        )
+
+        fig.update_layout(
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card'],
+            font_color=COLORS['text'],
+            xaxis=dict(title='Proporção', tickformat='.0%', gridcolor=COLORS['border']),
+            yaxis=dict(title='Cluster', categoryorder='array', categoryarray=sorted(long_df['Cluster'].unique(), key=lambda x: int(x))),
+            height=500,
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+            margin=dict(t=40, b=60, l=80, r=40)
+        )
+
+        return fig
+    except Exception as e:
+        return go.Figure().add_annotation(
+            text=f'Erro ao gerar gráfico: {e}', xref='paper', yref='paper',
+            x=0.5, y=0.5, showarrow=False, font=dict(size=14, color=COLORS['text'])
+        )
+
+@app.callback(
     Output('classification-performance-graph', 'figure'),
     Input('tabs', 'value')
 )
@@ -3537,13 +3676,16 @@ def update_classification_performance(tab):
     if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
+    cv_scores = getattr(classifier, 'cv_scores', None)
+    metrics_data = getattr(classifier, 'metrics', None)
+
     # Se houver métricas de validação disponíveis, usar
-    # Caso contrário, usar feature importance como proxy
-    if hasattr(classifier, 'cv_scores') and classifier.cv_scores:
+    # Caso contrário, usar dados agregados das métricas salvas
+    if cv_scores:
         # Mostrar scores de cross-validation
         metrics_df = pd.DataFrame({
-            'Fold': [f'Fold {i+1}' for i in range(len(classifier.cv_scores))],
-            'Accuracy': classifier.cv_scores
+            'Fold': [f'Fold {i+1}' for i in range(len(cv_scores))],
+            'Accuracy': cv_scores
         })
         
         fig = px.bar(metrics_df, x='Fold', y='Accuracy',
@@ -3551,378 +3693,44 @@ def update_classification_performance(tab):
                     color='Accuracy',
                     color_continuous_scale='Blues')
         
-        fig.add_hline(y=np.mean(classifier.cv_scores), 
+        fig.add_hline(y=np.mean(cv_scores), 
                      line_dash="dash", 
                      line_color="red",
-                     annotation_text=f"Média: {np.mean(classifier.cv_scores):.3f}")
-    else:
-        # Mostrar distribuição de predições por classe
-        from collections import Counter
-        
-        # Fazer predição em todo o dataset
-        X = df_global[classifier.feature_names]
-        predictions = classifier.predict(X)
-        
-        # Contar predições vs real
-        pred_counts = pd.DataFrame({
-            'Diagnóstico': df_global['Diagnóstico'].value_counts().index,
-            'Real': df_global['Diagnóstico'].value_counts().values,
-            'Predito': [Counter(predictions)[diag] for diag in df_global['Diagnóstico'].value_counts().index]
-        })
-        
+                     annotation_text=f"Média: {np.mean(cv_scores):.3f}")
+    elif metrics_data:
+        metric_names = ['Acurácia', 'Precisão', 'Recall', 'F1-Score']
+        metric_values = [
+            metrics_data.get('accuracy', 0),
+            metrics_data.get('precision', 0),
+            metrics_data.get('recall', 0),
+            metrics_data.get('f1_score', 0)
+        ]
+
         fig = go.Figure()
-        fig.add_trace(go.Bar(x=pred_counts['Diagnóstico'], y=pred_counts['Real'], 
-                            name='Real', marker_color=COLORS['primary']))
-        fig.add_trace(go.Bar(x=pred_counts['Diagnóstico'], y=pred_counts['Predito'], 
-                            name='Predito', marker_color=COLORS['accent']))
+        fig.add_trace(go.Bar(
+            x=metric_names,
+            y=metric_values,
+            marker=dict(color=[COLORS['success'], COLORS['primary'], COLORS['accent'], COLORS['warning']]),
+            text=[f'{val*100:.2f}%' for val in metric_values],
+            textposition='auto',
+            hovertemplate='<b>%{x}</b><br>Valor: %{y:.2%}<extra></extra>'
+        ))
+        fig.update_yaxes(range=[0, 1], tickformat='.0%')
+    else:
+        return metrics_unavailable_figure()
     
     fig.update_layout(
         plot_bgcolor=COLORS['background'],
         paper_bgcolor=COLORS['card'],
         font_color=COLORS['text'],
         xaxis_title='Diagnóstico',
-        yaxis_title='Contagem' if not hasattr(classifier, 'cv_scores') else 'Accuracy',
+        yaxis_title='Acurácia (cross-validation)' if cv_scores else 'Porcentagem',
         xaxis_tickangle=-45,
         barmode='group',
         height=500
     )
     
     return fig
-
-
-def create_prediction_layout():
-    """Layout de predição"""
-    return html.Div([
-        html.Div([
-            html.H2('Sistema de Predição de Diagnóstico', style={
-                'color': COLORS['text'], 
-                'marginBottom': '10px',
-                'fontSize': '2em',
-                'fontWeight': '700'
-            }),
-            html.P('Utilize inteligência artificial para prever diagnósticos baseados em dados clínicos e climáticos', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '30px'
-            })
-        ]),
-        
-        create_card([
-            html.Div([
-                html.Div('🔮', style={
-                    'fontSize': '3em',
-                    'textAlign': 'center',
-                    'marginBottom': '15px'
-                }),
-                html.P('Insira os dados do paciente para obter uma predição de diagnóstico:',
-                      style={
-                          'color': COLORS['text'], 
-                          'fontSize': '1.1em', 
-                          'marginBottom': '30px',
-                          'textAlign': 'center',
-                          'fontWeight': '500'
-                      })
-            ]),
-            
-            # Inputs climáticos e demográficos
-            html.Div([
-                html.Div([
-                    html.Label('Idade:', style={'color': COLORS['text'], 'fontWeight': 'bold'}),
-                    dcc.Input(id='input-age', type='number', value=35,
-                             style={'width': '100%', 'padding': '10px', 'borderRadius': '5px',
-                                   'border': 'none', 'fontSize': '1em'})
-                ], style={'width': '23%', 'display': 'inline-block', 'margin': '10px'}),
-                
-                html.Div([
-                    html.Label('Temperatura (°C):', style={'color': COLORS['text'], 'fontWeight': 'bold'}),
-                    dcc.Input(id='input-temp', type='number', value=25.0, step=0.1,
-                             style={'width': '100%', 'padding': '10px', 'borderRadius': '5px',
-                                   'border': 'none', 'fontSize': '1em'})
-                ], style={'width': '23%', 'display': 'inline-block', 'margin': '10px'}),
-                
-                html.Div([
-                    html.Label('Umidade (0-1):', style={'color': COLORS['text'], 'fontWeight': 'bold'}),
-                    dcc.Input(id='input-humidity', type='number', value=0.7, step=0.01, min=0, max=1,
-                             style={'width': '100%', 'padding': '10px', 'borderRadius': '5px',
-                                   'border': 'none', 'fontSize': '1em'})
-                ], style={'width': '23%', 'display': 'inline-block', 'margin': '10px'}),
-                
-                html.Div([
-                    html.Label('Velocidade do Vento (km/h):', style={'color': COLORS['text'], 'fontWeight': 'bold'}),
-                    dcc.Input(id='input-wind', type='number', value=10.0, step=0.1,
-                             style={'width': '100%', 'padding': '10px', 'borderRadius': '5px',
-                                   'border': 'none', 'fontSize': '1em'})
-                ], style={'width': '23%', 'display': 'inline-block', 'margin': '10px'}),
-            ]),
-            
-            # Seleção de sintomas
-            html.Div([
-                html.Label('Selecione Sintomas Presentes:', 
-                          style={'color': COLORS['text'], 'fontSize': '1.1em', 
-                                'fontWeight': 'bold', 'marginTop': '20px'}),
-                dcc.Checklist(
-                    id='symptom-checklist',
-                    options=[{'label': f' {s}', 'value': s} for s in symptom_cols if 'HIV' not in s.upper() and 'AIDS' not in s.upper()][:30],
-                    value=[],
-                    style={'color': COLORS['text'], 'columnCount': 3, 'marginTop': '15px'},
-                    labelStyle={'display': 'block', 'marginBottom': '10px'}
-                )
-            ], style={'marginTop': '20px'}),
-            
-            html.Div([
-                html.Button('🔍 Fazer Predição', id='predict-button', 
-                           style={
-                               'background': f'linear-gradient(135deg, {COLORS["primary"]} 0%, {COLORS["primary_light"]} 100%)',
-                               'color': 'white',
-                               'padding': '18px 50px',
-                               'border': 'none',
-                               'borderRadius': '50px',
-                               'fontSize': '1.2em',
-                               'cursor': 'pointer',
-                               'fontWeight': '700',
-                               'boxShadow': '0 10px 30px rgba(102, 126, 234, 0.4)',
-                               'transition': 'all 0.3s ease',
-                               'textTransform': 'uppercase',
-                               'letterSpacing': '1px',
-                               'width': '100%',
-                               'maxWidth': '400px'
-                           })
-            ], style={'textAlign': 'center', 'marginTop': '40px'}),
-            
-            html.Div(id='prediction-result', style={'marginTop': '30px'})
-        ])
-    ])
-
-
-@app.callback(
-    Output('prediction-result', 'children'),
-    Input('predict-button', 'n_clicks'),
-    [State('input-age', 'value'),
-     State('input-temp', 'value'),
-     State('input-humidity', 'value'),
-     State('input-wind', 'value'),
-     State('symptom-checklist', 'value')]
-)
-def make_prediction(n_clicks, age, temp, humidity, wind, symptoms):
-    """Faz predição de diagnóstico"""
-    load_data_and_models()
-    if n_clicks is None or not is_classifier_available():
-        return html.Div()
-    
-    try:
-        # Construir features
-        features = {
-            'Idade': age or 35,
-            'Temperatura (°C)': temp or 25.0,
-            'Umidade': humidity or 0.7,
-            'Velocidade do Vento (km/h)': wind or 10.0
-        }
-        
-        # Adicionar sintomas
-        for symptom in classifier.feature_names:
-            if symptom not in features:
-                features[symptom] = 1 if symptom in (symptoms or []) else 0
-        
-        # Criar DataFrame
-        X = pd.DataFrame([features])
-        X = X[classifier.feature_names]
-        
-        # First try to call the API if requests is available
-        cluster_info = None
-        api_response = None
-        if requests is not None:
-            try:
-                payload = {
-                    'idade': features.get('Idade'),
-                    'temperatura': features.get('Temperatura (°C)'),
-                    'umidade': features.get('Umidade'),
-                    'velocidade_vento': features.get('Velocidade do Vento (km/h)'),
-                    'sintomas': {k: int(v) for k, v in features.items() if k not in ['Idade','Temperatura (°C)','Umidade','Velocidade do Vento (km/h)']}
-                }
-
-                # /predict
-                predict_url = f"{API_BASE}/predict"
-                resp = requests.post(predict_url, json=payload, timeout=2)
-                if resp.status_code == 200:
-                    api_response = resp.json()
-                # /cluster and /risk_factors
-                try:
-                    cluster_url = f"{API_BASE}/cluster"
-                    r2 = requests.post(cluster_url, json=payload, timeout=2)
-                    if r2.status_code == 200:
-                        cluster_info = r2.json()
-                        # get more detailed risk_factors from API
-                        rf_url = f"{API_BASE}/risk_factors"
-                        r3 = requests.post(rf_url, json=payload, timeout=2)
-                        if r3.status_code == 200:
-                            cluster_info['risk_factors'] = r3.json()
-                except Exception:
-                    cluster_info = None
-            except Exception:
-                api_response = None
-
-        # If API gave a prediction, use it; otherwise fallback to local model
-        if api_response is not None:
-            diagnosis = api_response.get('diagnostico_predito', 'N/A')
-            probabilities = [api_response.get('probabilidades', {}).get(c, 0.0) for c in getattr(classifier, 'label_encoder',).classes_]
-            confidence = max(probabilities) * 100 if probabilities else 0.0
-        else:
-            # Fazer predição local
-            diagnosis = classifier.predict(X)[0]
-            probabilities = classifier.predict_proba(X)[0]
-            confidence = max(probabilities) * 100
-
-            # Prever cluster e local risk factors (fallback)
-            try:
-                if clusterer is not None and getattr(clusterer, 'model', None) is not None:
-                    cluster_label = int(clusterer.predict_cluster(X.values)[0])
-                    risk_factors = clusterer.identify_risk_factors(df_global, cluster_label)
-                    top_risks = list(risk_factors.items())[:5]
-                    cluster_info = {
-                        'cluster_label': cluster_label,
-                        'top_risks': top_risks
-                    }
-            except Exception:
-                cluster_info = None
-        
-        # Preparar resultado
-        all_probs = sorted(zip(classifier.label_encoder.classes_, probabilities), 
-                          key=lambda x: x[1], reverse=True)
-        
-        result = html.Div([
-            html.Div([
-                html.Div([
-                    html.Div('✨', style={'fontSize': '3em', 'textAlign': 'center', 'marginBottom': '15px'}),
-                    html.H3('Resultado da Predição', style={
-                        'color': COLORS['text'], 
-                        'marginBottom': '30px',
-                        'textAlign': 'center',
-                        'fontSize': '1.8em',
-                        'fontWeight': '700'
-                    })
-                ]),
-                
-                html.Div([
-                    html.Div([
-                        html.H4('Diagnóstico Predito', style={
-                            'color': COLORS['text_secondary'], 
-                            'margin': '0 0 15px 0',
-                            'fontSize': '0.9em',
-                            'textTransform': 'uppercase',
-                            'letterSpacing': '1px',
-                            'fontWeight': '600'
-                        }),
-                        html.H2(diagnosis, style={
-                            'color': COLORS['accent'], 
-                            'margin': '10px 0 20px 0',
-                            'fontSize': '2.5em',
-                            'fontWeight': '700',
-                            'background': f'linear-gradient(135deg, {COLORS["accent"]} 0%, {COLORS["accent_secondary"]} 100%)',
-                            'WebkitBackgroundClip': 'text',
-                            'WebkitTextFillColor': 'transparent'
-                        }),
-                        html.Div([
-                            html.Span('Confiança: ', style={
-                                'color': COLORS['text_secondary'],
-                                'fontSize': '1em',
-                                'fontWeight': '500'
-                            }),
-                            html.Span(f'{confidence:.2f}%', style={
-                                'color': COLORS['success'] if confidence > 70 else COLORS['warning'],
-                                'fontSize': '1.5em',
-                                'fontWeight': '700'
-                            })
-                        ])
-                    ], style={'textAlign': 'center'})
-                ], style={
-                    'background': f'linear-gradient(135deg, {COLORS["background"]} 0%, {COLORS["background_light"]} 100%)',
-                    'padding': '30px', 
-                    'borderRadius': '15px', 
-                    'marginBottom': '30px',
-                    'border': f'2px solid {COLORS["accent"]}',
-                    'boxShadow': f'0 0 30px rgba(240, 147, 251, 0.3)'
-                }),
-                
-                html.Div([
-                    html.H4('Probabilidades por Diagnóstico', style={
-                        'color': COLORS['text'], 
-                        'marginBottom': '20px',
-                        'fontSize': '1.2em',
-                        'fontWeight': '600',
-                        'borderBottom': f'2px solid {COLORS["border"]}',
-                        'paddingBottom': '10px'
-                    }),
-                    
-                    html.Div([
-                        html.Div([
-                            html.Div([
-                                html.Span(diag, style={
-                                    'fontWeight': '600', 
-                                    'color': COLORS['text'],
-                                    'fontSize': '1em'
-                                }),
-                                html.Div([
-                                    html.Div(style={
-                                        'width': f'{prob*100}%',
-                                        'height': '8px',
-                                        'background': f'linear-gradient(90deg, {COLORS["accent"]} 0%, {COLORS["accent_secondary"]} 100%)' if prob == max(probabilities) else f'linear-gradient(90deg, {COLORS["primary"]} 0%, {COLORS["primary_light"]} 100%)',
-                                        'borderRadius': '4px',
-                                        'transition': 'width 0.5s ease'
-                                    })
-                                ], style={
-                                    'backgroundColor': COLORS['background'],
-                                    'borderRadius': '4px',
-                                    'marginTop': '8px',
-                                    'marginBottom': '8px'
-                                }),
-                                html.Span(f'{prob*100:.2f}%', style={
-                                    'color': COLORS['accent'] if prob == max(probabilities) else COLORS['text_secondary'],
-                                    'fontSize': '0.9em',
-                                    'fontWeight': '700'
-                                })
-                            ], style={
-                                'padding': '15px',
-                                'backgroundColor': COLORS['background_light'],
-                                'borderRadius': '10px',
-                                'marginBottom': '12px',
-                                'border': f'2px solid {COLORS["accent"]}' if prob == max(probabilities) else f'1px solid {COLORS["border"]}',
-                                'boxShadow': f'0 4px 15px rgba(240, 147, 251, 0.3)' if prob == max(probabilities) else '0 2px 8px rgba(0,0,0,0.2)'
-                            })
-                        ])
-                        for diag, prob in all_probs[:5]
-                    ])
-                ]),
-
-                # Informação de cluster (se disponível)
-                html.Div([
-                    html.H4('Cluster Identificado (contexto ambiental)', style={
-                        'color': COLORS['text'], 'marginTop': '20px', 'fontSize': '1em', 'fontWeight': '600'
-                    }),
-                    html.Div([
-                        html.P(f"Cluster: {cluster_info['cluster_label']}") if cluster_info else html.P('Cluster: N/A'),
-                        html.P('Top fatores de risco (diferença média vs resto):') if cluster_info else html.P(''),
-                        html.Ul([
-                            html.Li(f"{k}: {v['difference']:.2f} (rel: {v['relative_diff']:+.1f}%)") for k, v in cluster_info['top_risks']
-                        ]) if cluster_info and cluster_info.get('top_risks') else html.P('Nenhum fator disponível')
-                    ], style={'textAlign': 'left', 'padding': '10px'})
-                ], style={'marginTop': '15px', 'paddingTop': '10px', 'borderTop': f'1px dashed {COLORS['border']}' }),
-
-            ], style={
-                'backgroundColor': COLORS['card'], 
-                'padding': '40px', 
-                'borderRadius': '20px', 
-                'boxShadow': '0 10px 40px rgba(0,0,0,0.5)',
-                'border': f'1px solid {COLORS["border"]}'
-            })
-        ])
-        
-        return result
-        
-    except Exception as e:
-        return html.Div([
-            html.P(f'Erro na predição: {str(e)}', 
-                  style={'color': 'red', 'fontSize': '1.1em'})
-        ])
 
 
 def create_pipeline_layout():
