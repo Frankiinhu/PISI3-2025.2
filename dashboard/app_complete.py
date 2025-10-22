@@ -2810,6 +2810,84 @@ def create_ml_layout():
             ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
         ]),
         
+        # ==================== CLUSTERIZAÇÃO POR PERFIS CLIMÁTICOS ====================
+        html.Div([
+            html.H3('🌤️ Clusterização por Perfis Climáticos', style={
+                'color': COLORS['text'], 
+                'marginTop': '50px',
+                'marginBottom': '10px',
+                'fontSize': '1.8em',
+                'fontWeight': '700',
+                'borderLeft': f'6px solid {COLORS["warning"]}',
+                'paddingLeft': '15px',
+                'background': f'linear-gradient(90deg, rgba(251, 191, 36, 0.1) 0%, transparent 100%)'
+            }),
+            html.P('Agrupamento baseado em condições climáticas (temperatura, umidade e vento)', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '1em',
+                'marginBottom': '25px',
+                'paddingLeft': '21px'
+            })
+        ]),
+        
+        # Controle de K (número de clusters)
+        html.Div([
+            create_card([
+                html.Label('🔢 Número de Clusters (K):', style={
+                    'color': COLORS['text'],
+                    'fontWeight': '600',
+                    'display': 'block',
+                    'marginBottom': '12px',
+                    'fontSize': '1.1em'
+                }),
+                dcc.Slider(
+                    id='climate-k-slider',
+                    min=4,
+                    max=6,
+                    step=1,
+                    value=5,
+                    marks={i: {'label': str(i), 'style': {'color': COLORS['text'], 'fontSize': '1.1em', 'fontWeight': '600'}} for i in range(4, 7)},
+                    tooltip={"placement": "bottom", "always_visible": True}
+                ),
+                html.Div(id='climate-k-info', style={
+                    'marginTop': '20px',
+                    'padding': '15px',
+                    'backgroundColor': COLORS['background'],
+                    'borderRadius': '8px',
+                    'color': COLORS['text_secondary'],
+                    'borderLeft': f'4px solid {COLORS["accent"]}'
+                })
+            ])
+        ], style={'marginBottom': '30px'}),
+        
+        # Visualizações dos perfis climáticos
+        html.Div([
+            create_card([dcc.Graph(id='climate-clusters-3d')], 
+                       'Clusters Climáticos em 3D (Temperatura, Umidade, Vento)')
+        ]),
+        
+        html.Div([
+            html.Div([
+                create_card([dcc.Graph(id='climate-clusters-2d')], 
+                           'Projeção 2D dos Perfis Climáticos (PCA)')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+            
+            html.Div([
+                create_card([dcc.Graph(id='climate-profiles-radar')], 
+                           'Características dos Perfis Climáticos')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='climate-profiles-table')], 
+                       'Descrição dos Perfis Climáticos')
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='climate-diagnosis-distribution')], 
+                       'Distribuição de Diagnósticos por Perfil Climático')
+        ]),
+        
         html.Div([
             create_card([dcc.Graph(id='classification-performance-graph')], 
                        'Performance da Classificação por Classe')
@@ -3828,6 +3906,507 @@ def update_cluster_symptoms_stacked(tab):
             text=f'Erro ao gerar gráfico: {e}', xref='paper', yref='paper',
             x=0.5, y=0.5, showarrow=False, font=dict(size=14, color=COLORS['text'])
         )
+
+
+# ==================== CALLBACKS PARA PERFIS CLIMÁTICOS ====================
+
+@app.callback(
+    Output('climate-k-info', 'children'),
+    Input('climate-k-slider', 'value')
+)
+def update_climate_k_info(k_value):
+    """Atualiza informação sobre o K selecionado"""
+    return html.Div([
+        html.P(f'✓ Número de perfis climáticos: {k_value}', style={
+            'color': COLORS['text'],
+            'fontSize': '1em',
+            'fontWeight': '600',
+            'margin': '0'
+        }),
+        html.P(f'Os dados serão agrupados em {k_value} perfis climáticos distintos baseados em temperatura, umidade e velocidade do vento.', style={
+            'color': COLORS['text_secondary'],
+            'fontSize': '0.9em',
+            'margin': '10px 0 0 0'
+        })
+    ])
+
+
+def perform_climate_clustering(k):
+    """Executa K-Means nas variáveis climáticas"""
+    from sklearn.cluster import KMeans
+    from sklearn.preprocessing import StandardScaler
+    
+    # Selecionar apenas variáveis climáticas
+    climate_features = ['Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
+    
+    # Verificar se as colunas existem
+    missing = [col for col in climate_features if col not in df_global.columns]
+    if missing:
+        raise ValueError(f'Colunas climáticas ausentes: {", ".join(missing)}')
+    
+    # Extrair features e remover NaN
+    X = df_global[climate_features].copy()
+    X = X.dropna()
+    
+    if X.empty:
+        raise ValueError('Nenhum dado climático válido disponível')
+    
+    # Padronizar features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Aplicar K-Means
+    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(X_scaled)
+    
+    # Criar DataFrame com resultados
+    result_df = X.copy()
+    result_df['Cluster'] = labels
+    
+    # Adicionar informações do dataset original
+    for col in ['Diagnóstico', 'Idade', 'Gênero']:
+        if col in df_global.columns:
+            result_df[col] = df_global.loc[result_df.index, col]
+    
+    # Calcular centroides em escala original
+    centroids_scaled = kmeans.cluster_centers_
+    centroids = scaler.inverse_transform(centroids_scaled)
+    
+    return result_df, centroids, scaler
+
+
+def get_climate_profile_name(temp, humidity, wind):
+    """Gera nome descritivo do perfil climático baseado nas características"""
+    # Classificar temperatura
+    if temp > 25:
+        temp_desc = "Quente"
+    elif temp > 18:
+        temp_desc = "Ameno"
+    else:
+        temp_desc = "Frio"
+    
+    # Classificar umidade
+    if humidity > 0.7:
+        humid_desc = "Úmido"
+    elif humidity > 0.4:
+        humid_desc = "Moderado"
+    else:
+        humid_desc = "Seco"
+    
+    # Classificar vento
+    if wind > 15:
+        wind_desc = "Ventoso"
+    elif wind > 5:
+        wind_desc = "Brisa Média"
+    else:
+        wind_desc = "Calmo"
+    
+    return f"{temp_desc} e {humid_desc}, {wind_desc}"
+
+
+@app.callback(
+    Output('climate-clusters-3d', 'figure'),
+    [Input('tabs', 'value'),
+     Input('climate-k-slider', 'value')]
+)
+def update_climate_clusters_3d(tab, k_value):
+    """Atualiza visualização 3D dos clusters climáticos"""
+    load_data_and_models()
+    if tab != 'tab-ml':
+        return go.Figure()
+    
+    try:
+        result_df, centroids, _ = perform_climate_clustering(k_value)
+        
+        # Criar gráfico 3D
+        fig = px.scatter_3d(
+            result_df,
+            x='Temperatura (°C)',
+            y='Umidade',
+            z='Velocidade do Vento (km/h)',
+            color='Cluster',
+            hover_data=['Diagnóstico', 'Idade'] if 'Diagnóstico' in result_df.columns else None,
+            color_continuous_scale='Viridis',
+            title=''
+        )
+        
+        # Adicionar centroides
+        for i, centroid in enumerate(centroids):
+            profile_name = get_climate_profile_name(centroid[0], centroid[1], centroid[2])
+            fig.add_trace(go.Scatter3d(
+                x=[centroid[0]],
+                y=[centroid[1]],
+                z=[centroid[2]],
+                mode='markers+text',
+                marker=dict(
+                    size=15,
+                    color='red',
+                    symbol='diamond',
+                    line=dict(color='white', width=2)
+                ),
+                text=[f'C{i}'],
+                textposition='top center',
+                textfont=dict(size=12, color='white', family='Arial Black'),
+                name=f'Centroide {i}: {profile_name}',
+                hovertemplate=f'<b>Perfil {i}: {profile_name}</b><br>' +
+                             f'Temp: {centroid[0]:.1f}°C<br>' +
+                             f'Umidade: {centroid[1]:.2%}<br>' +
+                             f'Vento: {centroid[2]:.1f} km/h<extra></extra>'
+            ))
+        
+        fig.update_layout(
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card'],
+            font_color=COLORS['text'],
+            height=650,
+            scene=dict(
+                xaxis=dict(title='Temperatura (°C)', backgroundcolor=COLORS['background']),
+                yaxis=dict(title='Umidade (%)', backgroundcolor=COLORS['background']),
+                zaxis=dict(title='Velocidade do Vento (km/h)', backgroundcolor=COLORS['background']),
+                bgcolor=COLORS['background']
+            ),
+            showlegend=True,
+            legend=dict(
+                orientation='v',
+                yanchor='top',
+                y=1,
+                xanchor='left',
+                x=0,
+                bgcolor='rgba(30, 33, 57, 0.8)',
+                bordercolor=COLORS['border'],
+                borderwidth=1
+            )
+        )
+        
+        return fig
+        
+    except Exception as e:
+        return go.Figure().add_annotation(
+            text=f'Erro ao gerar clusters climáticos: {str(e)}',
+            xref='paper', yref='paper',
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+
+@app.callback(
+    Output('climate-clusters-2d', 'figure'),
+    [Input('tabs', 'value'),
+     Input('climate-k-slider', 'value')]
+)
+def update_climate_clusters_2d(tab, k_value):
+    """Atualiza visualização 2D (PCA) dos clusters climáticos"""
+    load_data_and_models()
+    if tab != 'tab-ml':
+        return go.Figure()
+    
+    try:
+        from sklearn.decomposition import PCA
+        
+        result_df, centroids, scaler = perform_climate_clustering(k_value)
+        
+        # PCA para 2D
+        climate_features = ['Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
+        X = result_df[climate_features].values
+        X_scaled = scaler.transform(X)
+        
+        pca = PCA(n_components=2, random_state=42)
+        X_pca = pca.fit_transform(X_scaled)
+        
+        # Transformar centroides
+        centroids_pca = pca.transform(scaler.transform(centroids))
+        
+        # Criar DataFrame para plotagem
+        plot_df = pd.DataFrame({
+            'PC1': X_pca[:, 0],
+            'PC2': X_pca[:, 1],
+            'Cluster': result_df['Cluster'].astype(str)
+        })
+        
+        if 'Diagnóstico' in result_df.columns:
+            plot_df['Diagnóstico'] = result_df['Diagnóstico'].values
+        
+        # Criar gráfico
+        fig = px.scatter(
+            plot_df,
+            x='PC1',
+            y='PC2',
+            color='Cluster',
+            hover_data=['Diagnóstico'] if 'Diagnóstico' in plot_df.columns else None,
+            color_discrete_sequence=px.colors.qualitative.Set3,
+            title=''
+        )
+        
+        # Adicionar centroides
+        for i, centroid_pca in enumerate(centroids_pca):
+            profile_name = get_climate_profile_name(centroids[i][0], centroids[i][1], centroids[i][2])
+            fig.add_trace(go.Scatter(
+                x=[centroid_pca[0]],
+                y=[centroid_pca[1]],
+                mode='markers+text',
+                marker=dict(
+                    size=18,
+                    color='red',
+                    symbol='star',
+                    line=dict(color='white', width=2)
+                ),
+                text=[f'{i}'],
+                textposition='middle center',
+                textfont=dict(size=10, color='white', family='Arial Black'),
+                name=f'Perfil {i}: {profile_name}',
+                hovertemplate=f'<b>{profile_name}</b><extra></extra>',
+                showlegend=True
+            ))
+        
+        fig.update_layout(
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card'],
+            font_color=COLORS['text'],
+            xaxis_title=f'PC1 ({pca.explained_variance_ratio_[0]:.1%} var.)',
+            yaxis_title=f'PC2 ({pca.explained_variance_ratio_[1]:.1%} var.)',
+            height=500,
+            xaxis=dict(gridcolor=COLORS['border']),
+            yaxis=dict(gridcolor=COLORS['border'])
+        )
+        
+        return fig
+        
+    except Exception as e:
+        return go.Figure().add_annotation(
+            text=f'Erro ao gerar PCA 2D: {str(e)}',
+            xref='paper', yref='paper',
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+
+@app.callback(
+    Output('climate-profiles-radar', 'figure'),
+    [Input('tabs', 'value'),
+     Input('climate-k-slider', 'value')]
+)
+def update_climate_profiles_radar(tab, k_value):
+    """Atualiza gráfico radar com características dos perfis"""
+    load_data_and_models()
+    if tab != 'tab-ml':
+        return go.Figure()
+    
+    try:
+        result_df, centroids, _ = perform_climate_clustering(k_value)
+        
+        # Normalizar centroides para 0-100 para melhor visualização
+        from sklearn.preprocessing import MinMaxScaler
+        scaler = MinMaxScaler(feature_range=(0, 100))
+        centroids_normalized = scaler.fit_transform(centroids)
+        
+        # Criar gráfico radar
+        fig = go.Figure()
+        
+        categories = ['Temperatura', 'Umidade', 'Velocidade do Vento']
+        colors = px.colors.qualitative.Set3[:k_value]
+        
+        for i, (centroid_norm, centroid_orig) in enumerate(zip(centroids_normalized, centroids)):
+            profile_name = get_climate_profile_name(centroid_orig[0], centroid_orig[1], centroid_orig[2])
+            
+            fig.add_trace(go.Scatterpolar(
+                r=list(centroid_norm) + [centroid_norm[0]],  # Fechar o polígono
+                theta=categories + [categories[0]],
+                fill='toself',
+                name=f'Perfil {i}: {profile_name}',
+                line=dict(color=colors[i], width=2),
+                fillcolor=colors[i],
+                opacity=0.4,
+                hovertemplate='<b>%{theta}</b><br>Intensidade: %{r:.1f}<extra></extra>'
+            ))
+        
+        fig.update_layout(
+            polar=dict(
+                bgcolor=COLORS['card'],
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 100],
+                    tickfont=dict(size=10, color=COLORS['text']),
+                    gridcolor=COLORS['border']
+                ),
+                angularaxis=dict(
+                    tickfont=dict(size=11, color=COLORS['text'], weight='bold'),
+                    gridcolor=COLORS['border']
+                )
+            ),
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card'],
+            font=dict(family="Inter, sans-serif", color=COLORS['text']),
+            height=500,
+            showlegend=True,
+            legend=dict(
+                orientation='v',
+                yanchor='top',
+                y=1,
+                xanchor='left',
+                x=1.1,
+                bgcolor='rgba(30, 33, 57, 0.8)',
+                bordercolor=COLORS['border'],
+                borderwidth=1
+            )
+        )
+        
+        return fig
+        
+    except Exception as e:
+        return go.Figure().add_annotation(
+            text=f'Erro ao gerar radar: {str(e)}',
+            xref='paper', yref='paper',
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+
+@app.callback(
+    Output('climate-profiles-table', 'figure'),
+    [Input('tabs', 'value'),
+     Input('climate-k-slider', 'value')]
+)
+def update_climate_profiles_table(tab, k_value):
+    """Atualiza tabela com descrição dos perfis climáticos"""
+    load_data_and_models()
+    if tab != 'tab-ml':
+        return go.Figure()
+    
+    try:
+        result_df, centroids, _ = perform_climate_clustering(k_value)
+        
+        # Calcular estatísticas de cada cluster
+        table_data = []
+        for i in range(k_value):
+            cluster_data = result_df[result_df['Cluster'] == i]
+            profile_name = get_climate_profile_name(centroids[i][0], centroids[i][1], centroids[i][2])
+            
+            table_data.append({
+                'Perfil': f'{i}',
+                'Nome': profile_name,
+                'Temperatura (°C)': f"{centroids[i][0]:.1f}",
+                'Umidade (%)': f"{centroids[i][1]:.1%}",
+                'Vento (km/h)': f"{centroids[i][2]:.1f}",
+                'N° Pacientes': len(cluster_data)
+            })
+        
+        table_df = pd.DataFrame(table_data)
+        
+        # Criar tabela
+        fig = go.Figure(data=[go.Table(
+            header=dict(
+                values=list(table_df.columns),
+                fill_color=COLORS['primary'],
+                align='center',
+                font=dict(color='white', size=13, family='Inter, sans-serif', weight='bold'),
+                height=40
+            ),
+            cells=dict(
+                values=[table_df[col] for col in table_df.columns],
+                fill_color=[
+                    [COLORS['card'] if i % 2 == 0 else COLORS['card_hover'] for i in range(len(table_df))]
+                ],
+                align=['center'] * len(table_df.columns),
+                font=dict(color=COLORS['text'], size=12, family='Inter, sans-serif'),
+                height=35
+            )
+        )])
+        
+        fig.update_layout(
+            height=max(300, 100 + len(table_df) * 40),
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card'],
+            margin=dict(t=10, b=10, l=10, r=10)
+        )
+        
+        return fig
+        
+    except Exception as e:
+        return go.Figure().add_annotation(
+            text=f'Erro ao gerar tabela: {str(e)}',
+            xref='paper', yref='paper',
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
+
+@app.callback(
+    Output('climate-diagnosis-distribution', 'figure'),
+    [Input('tabs', 'value'),
+     Input('climate-k-slider', 'value')]
+)
+def update_climate_diagnosis_distribution(tab, k_value):
+    """Atualiza distribuição de diagnósticos por perfil climático"""
+    load_data_and_models()
+    if tab != 'tab-ml':
+        return go.Figure()
+    
+    try:
+        result_df, centroids, _ = perform_climate_clustering(k_value)
+        
+        if 'Diagnóstico' not in result_df.columns:
+            return go.Figure().add_annotation(
+                text='Coluna "Diagnóstico" não disponível',
+                xref='paper', yref='paper',
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color=COLORS['text'])
+            )
+        
+        # Criar labels com nomes dos perfis
+        result_df = result_df.copy()
+        result_df['Perfil'] = result_df['Cluster'].apply(
+            lambda c: f"Perfil {c}: {get_climate_profile_name(centroids[c][0], centroids[c][1], centroids[c][2])}"
+        )
+        
+        # Contar diagnósticos por perfil
+        diagnosis_counts = result_df.groupby(['Perfil', 'Diagnóstico']).size().reset_index(name='Contagem')
+        
+        # Criar gráfico de barras empilhadas
+        fig = px.bar(
+            diagnosis_counts,
+            x='Perfil',
+            y='Contagem',
+            color='Diagnóstico',
+            barmode='stack',
+            color_discrete_sequence=px.colors.qualitative.Set3,
+            title=''
+        )
+        
+        fig.update_layout(
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card'],
+            font_color=COLORS['text'],
+            xaxis_title='Perfil Climático',
+            yaxis_title='Número de Pacientes',
+            xaxis_tickangle=-20,
+            height=500,
+            legend=dict(
+                orientation='h',
+                yanchor='bottom',
+                y=1.02,
+                xanchor='right',
+                x=1
+            ),
+            xaxis=dict(gridcolor=COLORS['border']),
+            yaxis=dict(gridcolor=COLORS['border'])
+        )
+        
+        return fig
+        
+    except Exception as e:
+        return go.Figure().add_annotation(
+            text=f'Erro ao gerar distribuição: {str(e)}',
+            xref='paper', yref='paper',
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color=COLORS['text'])
+        )
+
 
 @app.callback(
     Output('classification-performance-graph', 'figure'),
