@@ -72,6 +72,15 @@ def load_data_and_models():
     global API_BASE
     API_BASE = os.environ.get('VITANIMBUS_API', 'http://127.0.0.1:5000')
 
+# Funções auxiliares de verificação
+def is_classifier_available():
+    """Verifica se o classifier está disponível e carregado"""
+    return classifier is not None and hasattr(classifier, 'model') and classifier.model is not None
+
+def has_feature_importances():
+    """Verifica se o classifier tem feature importances"""
+    return classifier is not None and hasattr(classifier, 'feature_importances') and classifier.feature_importances is not None
+
 # Inicializar app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "Nimbusvita - Análise de Doenças Climáticas"
@@ -119,20 +128,20 @@ app.index_string = '''
             }
             
             input[type="number"]:focus {
-                border-color: #667eea !important;
-                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+                border-color: #5559ff !important;
+                box-shadow: 0 0 0 3px rgba(85, 89, 255, 0.1) !important;
                 outline: none;
             }
             
             /* Estilo para checkboxes */
             input[type="checkbox"] {
-                accent-color: #667eea;
+                accent-color: #5559ff;
             }
             
             /* Animação do botão */
             button:hover {
                 transform: translateY(-2px);
-                box-shadow: 0 15px 40px rgba(102, 126, 234, 0.6) !important;
+                box-shadow: 0 15px 40px rgba(85, 89, 255, 0.6) !important;
             }
             
             button:active {
@@ -149,12 +158,12 @@ app.index_string = '''
             }
             
             ::-webkit-scrollbar-thumb {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: linear-gradient(135deg, #5559ff 0%, #7b7fff 100%);
                 border-radius: 5px;
             }
             
             ::-webkit-scrollbar-thumb:hover {
-                background: linear-gradient(135deg, #764ba2 0%, #f093fb 100%);
+                background: linear-gradient(135deg, #7b7fff 0%, #a4a8ff 100%);
             }
             
             /* Dropdown styles */
@@ -264,8 +273,8 @@ app.index_string = '''
                 width: 50px;
                 height: 50px;
                 margin: -25px 0 0 -25px;
-                border: 4px solid rgba(102, 126, 234, 0.3);
-                border-top-color: #667eea;
+                border: 4px solid rgba(85, 89, 255, 0.3);
+                border-top-color: #5559ff;
                 border-radius: 50%;
                 animation: spin 1s linear infinite;
             }
@@ -307,9 +316,9 @@ app.index_string = '''
             .skeleton-loader {
                 background: linear-gradient(
                     90deg,
-                    rgba(102, 126, 234, 0.1) 0%,
-                    rgba(102, 126, 234, 0.3) 50%,
-                    rgba(102, 126, 234, 0.1) 100%
+                    rgba(85, 89, 255, 0.1) 0%,
+                    rgba(85, 89, 255, 0.3) 50%,
+                    rgba(85, 89, 255, 0.1) 100%
                 );
                 background-size: 200px 100%;
                 animation: skeletonLoading 1.5s infinite;
@@ -394,7 +403,7 @@ app.index_string = '''
             
             .progress-bar {
                 height: 4px;
-                background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
+                background: linear-gradient(90deg, #5559ff, #7b7fff, #a4a8ff);
                 animation: progressBar 2s ease-out;
             }
         </style>
@@ -410,16 +419,20 @@ app.index_string = '''
 </html>
 '''
 
-# Cores e estilo - Tema moderno e profissional
+# Cores e estilo - Tema NimbusVita
 COLORS = {
     'background': '#0a0e27',
     'background_light': '#1a1f3a',
-    'primary': '#667eea',
-    'primary_light': '#764ba2',
+    'primary': '#5559ff',
+    'primary_light': '#7b7fff',
+    'primary_dark': '#3d41cc',
     'secondary': '#131829',
+    'secondary_light': '#f5d76e',
+    'secondary_dark': '#d1974b',
     'text': '#e8eaf6',
     'text_secondary': '#9fa8da',
-    'accent': '#f093fb',
+    'accent': '#a4a8ff',
+    'accent_light': '#c4c7ff',
     'accent_secondary': '#4facfe',
     'card': '#1e2139',
     'card_hover': '#252a48',
@@ -815,7 +828,7 @@ def update_diagnosis_count(tab):
     """Atualiza gráfico de contagem de diagnósticos"""
     load_data_and_models()
     if tab != 'tab-overview':
-        return {}
+        return go.Figure()
     
     diag_counts = df_global['Diagnóstico'].value_counts().reset_index()
     diag_counts.columns = ['Diagnóstico', 'Contagem']
@@ -851,7 +864,7 @@ def update_age_distribution(tab):
     """Atualiza distribuição de idade"""
     load_data_and_models()
     if tab != 'tab-overview':
-        return {}
+        return go.Figure()
     
     fig = px.histogram(df_global, x='Idade', nbins=30,
                       title='',
@@ -881,7 +894,7 @@ def update_climate_distribution(tab):
     """Atualiza distribuição de variáveis climáticas"""
     load_data_and_models()
     if tab != 'tab-overview':
-        return {}
+        return go.Figure()
     
     fig = make_subplots(rows=3, cols=1,
                        subplot_titles=climatic_vars)
@@ -941,18 +954,34 @@ def create_eda_layout():
             })
         ]),
         
-        # Placeholder para análises univariadas futuras
+        # Gráficos de distribuição individual
         html.Div([
-            create_card([
-                html.Div([
-                    html.P('📈 Gráficos de distribuição individual virão aqui', style={
-                        'color': COLORS['text_secondary'],
-                        'textAlign': 'center',
-                        'padding': '40px',
-                        'fontSize': '1.1em'
-                    })
-                ])
-            ], 'Distribuições Individuais')
+            html.Div([
+                create_card([dcc.Graph(id='age-dist-univariate')], 
+                           'Distribuição de Idade')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+            
+            html.Div([
+                create_card([dcc.Graph(id='gender-dist-univariate')], 
+                           'Distribuição de Gênero')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+        ]),
+        
+        html.Div([
+            html.Div([
+                create_card([dcc.Graph(id='temp-dist-univariate')], 
+                           'Distribuição de Temperatura')
+            ], style={'width': '32%', 'display': 'inline-block', 'padding': '10px'}),
+            
+            html.Div([
+                create_card([dcc.Graph(id='humidity-dist-univariate')], 
+                           'Distribuição de Umidade')
+            ], style={'width': '32%', 'display': 'inline-block', 'padding': '10px'}),
+            
+            html.Div([
+                create_card([dcc.Graph(id='wind-dist-univariate')], 
+                           'Distribuição de Velocidade do Vento')
+            ], style={'width': '32%', 'display': 'inline-block', 'padding': '10px'}),
         ]),
         
         # ==================== ANÁLISE BIVARIADA ====================
@@ -1001,6 +1030,29 @@ def create_eda_layout():
                 create_card([dcc.Graph(id='wind-diagnosis-graph')], 
                            'Velocidade do Vento vs Diagnóstico')
             ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+        ]),
+        
+        # Seção: Sintomas vs Diagnóstico (Bivariada)
+        html.Div([
+            html.H4('🩺 Correlação Sintomas vs Diagnóstico', style={
+                'color': COLORS['text'], 
+                'marginTop': '30px',
+                'marginBottom': '20px',
+                'fontSize': '1.4em',
+                'fontWeight': '600',
+                'paddingLeft': '10px'
+            }),
+            html.P('Matriz de correlação mostrando a relação entre sintomas e diagnósticos', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '0.95em',
+                'marginBottom': '20px',
+                'paddingLeft': '10px'
+            })
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='symptom-diagnosis-correlation')], 
+                       'Matriz de Correlação: Sintomas x Diagnósticos')
         ]),
         
         # Explorador Interativo de Perfis Climáticos
@@ -1215,15 +1267,8 @@ def create_eda_layout():
         ]),
         
         html.Div([
-            html.Div([
-                create_card([dcc.Graph(id='climate-distribution-graph')], 
-                           'Distribuição das Condições Climáticas')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-            
-            html.Div([
-                create_card([dcc.Graph(id='climate-correlation-graph')], 
-                           'Correlação com Condições Climáticas')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+            create_card([dcc.Graph(id='climate-correlation-graph')], 
+                       'Correlação com Condições Climáticas')
         ]),
         
         # Seção: Sintomas vs Diagnóstico (Bivariada)
@@ -1338,7 +1383,7 @@ def update_symptom_frequency(selected_symptoms, tab):
     """Atualiza gráficos de frequência de sintomas"""
     load_data_and_models()
     if tab != 'tab-eda' or not selected_symptoms:
-        return {}
+        return go.Figure()
     
     # Criar subplots
     n_symptoms = len(selected_symptoms)
@@ -1386,10 +1431,10 @@ def update_correlation_matrix(tab):
     """Atualiza matriz de correlação"""
     load_data_and_models()
     if tab != 'tab-eda':
-        return {}
+        return go.Figure()
     
     # Selecionar top features
-    if classifier.feature_importances is not None:
+    if classifier is not None and hasattr(classifier, 'feature_importances') and classifier.feature_importances is not None:
         top_features = classifier.feature_importances.head(15).index.tolist()
         # Adicionar variáveis climáticas
         features_to_correlate = list(set(top_features + climatic_vars + ['Idade']))
@@ -1470,7 +1515,7 @@ def update_temp_diagnosis(tab):
     """Atualiza gráfico temperatura vs diagnóstico"""
     load_data_and_models()
     if tab != 'tab-eda':
-        return {}
+        return go.Figure()
     
     fig = px.box(df_global, x='Diagnóstico', y='Temperatura (°C)',
                  title='',
@@ -1504,7 +1549,7 @@ def update_humidity_diagnosis(tab):
     """Atualiza gráfico umidade vs diagnóstico"""
     load_data_and_models()
     if tab != 'tab-eda':
-        return {}
+        return go.Figure()
     
     fig = px.box(df_global, x='Diagnóstico', y='Umidade',
                  title='',
@@ -1538,7 +1583,7 @@ def update_wind_diagnosis(tab):
     """Atualiza gráfico vento vs diagnóstico"""
     load_data_and_models()
     if tab != 'tab-eda':
-        return {}
+        return go.Figure()
     
     fig = px.box(df_global, x='Diagnóstico', y='Velocidade do Vento (km/h)',
                  title='',
@@ -1559,6 +1604,284 @@ def update_wind_diagnosis(tab):
         marker=dict(color=COLORS['accent_secondary'], line=dict(color=COLORS['accent_secondary'], width=2)),
         fillcolor='rgba(79, 172, 254, 0.5)',
         line=dict(color=COLORS['accent_secondary'])
+    )
+    
+    return fig
+
+
+@app.callback(
+    Output('symptom-diagnosis-correlation', 'figure'),
+    Input('tabs', 'value')
+)
+def update_symptom_diagnosis_correlation(tab):
+    """Atualiza matriz de correlação sintoma x diagnóstico"""
+    load_data_and_models()
+    if tab != 'tab-eda':
+        return go.Figure()
+    
+    try:
+        print("=== DEBUG: Iniciando matriz de correlação ===")
+        print(f"Total de colunas de sintomas: {len(symptom_cols)}")
+        
+        # Filtrar sintomas (remover HIV/AIDS)
+        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
+        print(f"Sintomas filtrados (sem HIV/AIDS): {len(symptom_cols_filtered)}")
+        
+        if not symptom_cols_filtered:
+            print("ERRO: Nenhum sintoma disponível!")
+            return go.Figure()
+        
+        # Selecionar top 20 sintomas mais frequentes
+        symptom_sums = df_global[symptom_cols_filtered].sum().sort_values(ascending=False)
+        top_symptoms = symptom_sums.head(20).index.tolist()
+        print(f"Top 20 sintomas: {top_symptoms[:5]}...")  # Mostra os 5 primeiros
+        
+        # Criar matriz de correlação: para cada diagnóstico, calcular a proporção de cada sintoma
+        diagnoses = sorted(df_global['Diagnóstico'].unique())
+        print(f"Diagnósticos encontrados: {diagnoses}")
+        
+        correlation_matrix = []
+        
+        for diagnosis in diagnoses:
+            diagnosis_df = df_global[df_global['Diagnóstico'] == diagnosis]
+            print(f"Diagnóstico '{diagnosis}': {len(diagnosis_df)} pacientes")
+            
+            symptom_proportions = []
+            
+            for symptom in top_symptoms:
+                if symptom in diagnosis_df.columns:
+                    # Proporção de pacientes com esse diagnóstico que têm esse sintoma
+                    proportion = diagnosis_df[symptom].mean()
+                    symptom_proportions.append(proportion)
+                else:
+                    symptom_proportions.append(0)
+            
+            print(f"  Proporções (primeiras 5): {symptom_proportions[:5]}")
+            correlation_matrix.append(symptom_proportions)
+        
+        print(f"Matriz criada: {len(correlation_matrix)} linhas x {len(correlation_matrix[0]) if correlation_matrix else 0} colunas")
+        
+        # Formatar nomes dos sintomas
+        symptom_names = [s.replace('_', ' ').title() for s in top_symptoms]
+        
+        # Criar heatmap com escala de cores adequada
+        fig = go.Figure(data=go.Heatmap(
+            z=correlation_matrix,
+            x=symptom_names,
+            y=diagnoses,
+            colorscale='Blues',  # Usar escala de cores padrão do Plotly
+            colorbar=dict(
+                title=dict(
+                    text='Proporção',
+                    side='right'
+                ),
+                tickmode='linear',
+                tick0=0,
+                dtick=0.2,
+                tickfont=dict(color=COLORS['text'])
+            ),
+            hovertemplate='<b>Diagnóstico:</b> %{y}<br><b>Sintoma:</b> %{x}<br><b>Proporção:</b> %{z:.1%}<extra></extra>',
+            zmid=0.5,  # Ponto médio da escala
+            zmin=0,
+            zmax=1
+        ))
+        
+        fig.update_layout(
+            plot_bgcolor=COLORS['background'],
+            paper_bgcolor=COLORS['card'],
+            font_color=COLORS['text'],
+            xaxis_title='Sintomas',
+            yaxis_title='Diagnósticos',
+            xaxis=dict(
+                tickangle=-45,
+                tickfont=dict(size=10),
+                gridcolor=COLORS['border'],
+                showgrid=False
+            ),
+            yaxis=dict(
+                tickfont=dict(size=11),
+                gridcolor=COLORS['border'],
+                showgrid=False
+            ),
+            height=600,
+            margin=dict(l=150, r=100, t=50, b=150)
+        )
+        
+        print("=== DEBUG: Matriz criada com sucesso ===")
+        return fig
+        
+    except Exception as e:
+        print(f"ERRO ao criar matriz de correlação: {e}")
+        import traceback
+        traceback.print_exc()
+        return go.Figure()
+
+
+# ==================== CALLBACKS PARA ANÁLISE UNIVARIADA ====================
+
+@app.callback(
+    Output('age-dist-univariate', 'figure'),
+    Input('tabs', 'value')
+)
+def update_age_dist_univariate(tab):
+    """Atualiza distribuição de idade (univariada)"""
+    load_data_and_models()
+    if tab != 'tab-eda':
+        return go.Figure()
+    
+    fig = px.histogram(df_global, x='Idade', nbins=30,
+                      title='',
+                      color_discrete_sequence=[COLORS['primary']])
+    
+    mean_age = df_global['Idade'].mean()
+    median_age = df_global['Idade'].median()
+    
+    fig.add_vline(x=mean_age, line_dash="dash", line_color=COLORS['accent'],
+                  annotation_text=f"Média: {mean_age:.1f}", annotation_position="top right")
+    fig.add_vline(x=median_age, line_dash="dot", line_color=COLORS['accent_secondary'],
+                  annotation_text=f"Mediana: {median_age:.1f}", annotation_position="bottom right")
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis_title='Idade (anos)',
+        yaxis_title='Frequência',
+        showlegend=False,
+        xaxis=dict(gridcolor=COLORS['border']),
+        yaxis=dict(gridcolor=COLORS['border'])
+    )
+    
+    return fig
+
+
+@app.callback(
+    Output('gender-dist-univariate', 'figure'),
+    Input('tabs', 'value')
+)
+def update_gender_dist_univariate(tab):
+    """Atualiza distribuição de gênero (univariada)"""
+    load_data_and_models()
+    if tab != 'tab-eda':
+        return go.Figure()
+    
+    gender_counts = df_global['Gênero'].value_counts().reset_index()
+    gender_counts.columns = ['Gênero', 'Contagem']
+    gender_counts['Gênero'] = gender_counts['Gênero'].map({0: 'Feminino', 1: 'Masculino'})
+    
+    fig = px.bar(gender_counts, x='Gênero', y='Contagem',
+                 title='',
+                 color='Gênero',
+                 color_discrete_map={'Feminino': COLORS['accent'], 'Masculino': COLORS['primary']})
+    
+    # Adicionar valores nas barras
+    fig.update_traces(texttemplate='%{y}', textposition='outside')
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis_title='Gênero',
+        yaxis_title='Contagem',
+        showlegend=False,
+        xaxis=dict(gridcolor=COLORS['border']),
+        yaxis=dict(gridcolor=COLORS['border'])
+    )
+    
+    return fig
+
+
+@app.callback(
+    Output('temp-dist-univariate', 'figure'),
+    Input('tabs', 'value')
+)
+def update_temp_dist_univariate(tab):
+    """Atualiza distribuição de temperatura (univariada)"""
+    load_data_and_models()
+    if tab != 'tab-eda':
+        return go.Figure()
+    
+    fig = px.histogram(df_global, x='Temperatura (°C)', nbins=30,
+                      title='',
+                      color_discrete_sequence=[COLORS['accent']])
+    
+    mean_temp = df_global['Temperatura (°C)'].mean()
+    fig.add_vline(x=mean_temp, line_dash="dash", line_color=COLORS['primary'],
+                  annotation_text=f"Média: {mean_temp:.1f}°C", annotation_position="top right")
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis_title='Temperatura (°C)',
+        yaxis_title='Frequência',
+        showlegend=False,
+        xaxis=dict(gridcolor=COLORS['border']),
+        yaxis=dict(gridcolor=COLORS['border'])
+    )
+    
+    return fig
+
+
+@app.callback(
+    Output('humidity-dist-univariate', 'figure'),
+    Input('tabs', 'value')
+)
+def update_humidity_dist_univariate(tab):
+    """Atualiza distribuição de umidade (univariada)"""
+    load_data_and_models()
+    if tab != 'tab-eda':
+        return go.Figure()
+    
+    fig = px.histogram(df_global, x='Umidade', nbins=30,
+                      title='',
+                      color_discrete_sequence=[COLORS['primary']])
+    
+    mean_humidity = df_global['Umidade'].mean()
+    fig.add_vline(x=mean_humidity, line_dash="dash", line_color=COLORS['accent'],
+                  annotation_text=f"Média: {mean_humidity:.2f}", annotation_position="top right")
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis_title='Umidade',
+        yaxis_title='Frequência',
+        showlegend=False,
+        xaxis=dict(gridcolor=COLORS['border']),
+        yaxis=dict(gridcolor=COLORS['border'])
+    )
+    
+    return fig
+
+
+@app.callback(
+    Output('wind-dist-univariate', 'figure'),
+    Input('tabs', 'value')
+)
+def update_wind_dist_univariate(tab):
+    """Atualiza distribuição de velocidade do vento (univariada)"""
+    load_data_and_models()
+    if tab != 'tab-eda':
+        return go.Figure()
+    
+    fig = px.histogram(df_global, x='Velocidade do Vento (km/h)', nbins=30,
+                      title='',
+                      color_discrete_sequence=[COLORS['accent_secondary']])
+    
+    mean_wind = df_global['Velocidade do Vento (km/h)'].mean()
+    fig.add_vline(x=mean_wind, line_dash="dash", line_color=COLORS['primary'],
+                  annotation_text=f"Média: {mean_wind:.1f} km/h", annotation_position="top right")
+    
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis_title='Velocidade do Vento (km/h)',
+        yaxis_title='Frequência',
+        showlegend=False,
+        xaxis=dict(gridcolor=COLORS['border']),
+        yaxis=dict(gridcolor=COLORS['border'])
     )
     
     return fig
@@ -1624,7 +1947,7 @@ def update_symptom_heatmap(tab):
             z=symptom_subset.T.values,
             x=symptom_subset.index.tolist(),
             y=top_symptoms.tolist(),
-            colorscale=[[0, '#0a0e27'], [0.5, '#667eea'], [1, '#f093fb']],
+            colorscale=[[0, '#0a0e27'], [0.5, '#5559ff'], [1, '#a4a8ff']],
             colorbar=dict(
                 title=dict(
                     text='<b>Contagem</b>',
@@ -1695,8 +2018,8 @@ def update_diagnosis_by_symptom(tab):
             horizontal_spacing=0.15
         )
         
-        # Gradiente de cores moderno
-        colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#00c9a7', 
+        # Gradiente de cores moderno (paleta NimbusVita)
+        colors = ['#5559ff', '#7b7fff', '#a4a8ff', '#4facfe', '#00c9a7', 
                   '#fbbf24', '#f87171', '#4ade80', '#60a5fa', '#a78bfa']
         
         for idx, symptom in enumerate(top_10_symptoms):
@@ -1772,10 +2095,10 @@ def update_symptom_importance(tab):
     """Atualiza gráfico de importância de sintomas"""
     load_data_and_models()
     if tab != 'tab-eda':
-        return {}
+        return go.Figure()
     
-    if classifier.feature_importances is None:
-        return {}
+    if classifier is None or not hasattr(classifier, 'feature_importances') or classifier.feature_importances is None:
+        return go.Figure()
     
     top_features = classifier.feature_importances.head(15)
     
@@ -1803,7 +2126,6 @@ def update_symptom_importance(tab):
 @app.callback(
     [Output('filter-stats', 'children'),
      Output('climate-explorer-graph', 'figure'),
-     Output('climate-distribution-graph', 'figure'),
      Output('climate-correlation-graph', 'figure')],
     [Input('temp-profile-filter', 'value'),
      Input('humidity-profile-filter', 'value'),
@@ -1818,7 +2140,7 @@ def update_climate_explorer(temp_profile, humidity_profile, wind_profile, gender
     load_data_and_models()
     
     if tab != 'tab-eda':
-        return html.Div(), go.Figure(), go.Figure(), go.Figure()
+        return html.Div(), go.Figure(), go.Figure()
     
     # Aplicar filtros climáticos
     df_filtered = df_global.copy()
@@ -1969,53 +2291,6 @@ def update_climate_explorer(temp_profile, humidity_profile, wind_profile, gender
             margin=dict(t=60, b=60, l=200, r=30)
         )
     
-    # Gráfico de distribuição climática (boxplot)
-    dist_fig = make_subplots(
-        rows=1, cols=3,
-        subplot_titles=('Temperatura (°C)', 'Umidade', 'Vento (km/h)')
-    )
-    
-    dist_fig.add_trace(
-        go.Box(
-            y=df_filtered['Temperatura (°C)'],
-            name='Temp',
-            marker=dict(color=COLORS['accent']),
-            showlegend=False
-        ),
-        row=1, col=1
-    )
-    
-    dist_fig.add_trace(
-        go.Box(
-            y=df_filtered['Umidade'],
-            name='Umid',
-            marker=dict(color=COLORS['primary']),
-            showlegend=False
-        ),
-        row=1, col=2
-    )
-    
-    dist_fig.add_trace(
-        go.Box(
-            y=df_filtered['Velocidade do Vento (km/h)'],
-            name='Vento',
-            marker=dict(color=COLORS['accent_secondary']),
-            showlegend=False
-        ),
-        row=1, col=3
-    )
-    
-    dist_fig.update_layout(
-        height=350,
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=COLORS['text'], family='Inter, sans-serif'),
-        showlegend=False,
-        margin=dict(t=50, b=40, l=60, r=30)
-    )
-    
-    dist_fig.update_yaxes(gridcolor=COLORS['border'])
-    
     # Gráfico de correlação (scatter matrix)
     if view_type == 'diagnosticos':
         # Correlação entre variáveis climáticas colorido por diagnóstico
@@ -2039,7 +2314,7 @@ def update_climate_explorer(temp_profile, humidity_profile, wind_profile, gender
                 text='<b>Temperatura vs Umidade por Diagnóstico</b>',
                 font=dict(size=14, color=COLORS['text'])
             ),
-            height=350,
+            height=450,
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             font=dict(color=COLORS['text'], family='Inter, sans-serif'),
@@ -2076,7 +2351,7 @@ def update_climate_explorer(temp_profile, humidity_profile, wind_profile, gender
                 text='<b>Média de Sintomas por Faixa de Temperatura</b>',
                 font=dict(size=14, color=COLORS['text'])
             ),
-            height=350,
+            height=450,
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             font=dict(color=COLORS['text'], family='Inter, sans-serif'),
@@ -2086,12 +2361,12 @@ def update_climate_explorer(temp_profile, humidity_profile, wind_profile, gender
             margin=dict(t=50, b=100, l=60, r=30)
         )
     
-    return stats_div, main_fig, dist_fig, corr_fig
+    return stats_div, main_fig, corr_fig
 
 
 def create_ml_layout():
     """Layout dos modelos de ML"""
-    if classifier.model is None:
+    if classifier is None or not hasattr(classifier, 'model') or classifier.model is None:
         return html.Div([
             html.Div([
                 html.H2('Modelos de Machine Learning', style={
@@ -2203,7 +2478,7 @@ def create_ml_layout():
 def update_model_metrics(tab):
     """Atualiza exibição de métricas do modelo"""
     load_data_and_models()
-    if tab != 'tab-ml' or classifier.model is None:
+    if tab != 'tab-ml' or not is_classifier_available():
         return html.Div()
     
     # Verificar se há métricas salvas
@@ -2381,7 +2656,7 @@ def update_model_metrics(tab):
 def update_metrics_bar_chart(tab):
     """Atualiza gráfico de barras comparando métricas"""
     load_data_and_models()
-    if tab != 'tab-ml' or classifier.model is None:
+    if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
     try:
@@ -2502,7 +2777,7 @@ def update_metrics_bar_chart(tab):
 def update_metrics_radar_chart(tab):
     """Atualiza gráfico radar de métricas"""
     load_data_and_models()
-    if tab != 'tab-ml' or classifier.model is None:
+    if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
     try:
@@ -2538,9 +2813,9 @@ def update_metrics_radar_chart(tab):
             r=values,
             theta=categories,
             fill='toself',
-            fillcolor='rgba(102, 126, 234, 0.3)',
-            line=dict(color='#667eea', width=3),
-            marker=dict(size=10, color='#f093fb', line=dict(color='#667eea', width=2)),
+            fillcolor='rgba(85, 89, 255, 0.3)',
+            line=dict(color='#5559ff', width=3),
+            marker=dict(size=10, color='#a4a8ff', line=dict(color='#5559ff', width=2)),
             name='Métricas',
             hovertemplate='<b>%{theta}</b><br>Valor: %{r:.2f}%<extra></extra>'
         ))
@@ -2575,8 +2850,8 @@ def update_metrics_radar_chart(tab):
         fig.update_traces(
             marker=dict(
                 size=10, 
-                color='#f093fb', 
-                line=dict(color='#667eea', width=2),
+                color='#a4a8ff', 
+                line=dict(color='#5559ff', width=2),
                 opacity=0.9
             )
         )
@@ -2601,7 +2876,7 @@ def update_metrics_radar_chart(tab):
 def update_accuracy_gauge(tab):
     """Atualiza indicador gauge de acurácia"""
     load_data_and_models()
-    if tab != 'tab-ml' or classifier.model is None:
+    if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
     try:
@@ -2681,7 +2956,7 @@ def update_accuracy_gauge(tab):
 def update_metrics_comparison_line(tab):
     """Atualiza gráfico de linha comparando métricas"""
     load_data_and_models()
-    if tab != 'tab-ml' or classifier.model is None:
+    if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
     try:
@@ -2812,7 +3087,7 @@ def update_metrics_comparison_line(tab):
 def update_feature_importance(tab):
     """Atualiza gráfico de importância de features"""
     load_data_and_models()
-    if tab != 'tab-ml' or classifier.feature_importances is None:
+    if tab != 'tab-ml' or classifier is None or not hasattr(classifier, 'feature_importances') or classifier.feature_importances is None:
         return go.Figure()
     
     try:
@@ -2865,7 +3140,7 @@ def update_cluster_visualization_2d(tab):
     """Atualiza visualização de clusters 2D"""
     load_data_and_models()
     if tab != 'tab-ml' or clusterer.labels_ is None:
-        return {}
+        return go.Figure()
     
     # Preparar dados para visualização
     X_scaled = clusterer.scaler.transform(
@@ -2910,7 +3185,7 @@ def update_cluster_pca_3d(tab):
     """Atualiza visualização de clusters em 3D com PCA"""
     load_data_and_models()
     if tab != 'tab-ml' or clusterer.labels_ is None:
-        return {}
+        return go.Figure()
     
     # Preparar dados para visualização
     X_scaled = clusterer.scaler.transform(
@@ -2980,7 +3255,7 @@ def update_cluster_visualization_3d(tab):
     """Atualiza visualização de clusters em 3D com variáveis climáticas"""
     load_data_and_models()
     if tab != 'tab-ml' or clusterer.labels_ is None:
-        return {}
+        return go.Figure()
     
     # Criar DataFrame para plotar com as 3 variáveis climáticas
     plot_df = pd.DataFrame({
@@ -3031,8 +3306,8 @@ def update_cluster_visualization_3d(tab):
 def update_classification_performance(tab):
     """Atualiza gráfico de performance da classificação"""
     load_data_and_models()
-    if tab != 'tab-ml' or classifier.model is None:
-        return {}
+    if tab != 'tab-ml' or not is_classifier_available():
+        return go.Figure()
     
     # Se houver métricas de validação disponíveis, usar
     # Caso contrário, usar feature importance como proxy
@@ -3203,7 +3478,7 @@ def create_prediction_layout():
 def make_prediction(n_clicks, age, temp, humidity, wind, symptoms):
     """Faz predição de diagnóstico"""
     load_data_and_models()
-    if n_clicks is None or classifier.model is None:
+    if n_clicks is None or not is_classifier_available():
         return html.Div()
     
     try:
@@ -3548,11 +3823,11 @@ def update_pipeline_visualizations(tab):
     
     # Definir posições dos nós em um fluxo mais organizado (3 linhas)
     stages_info = [
-        {"name": "📥 Dados<br>Brutos", "x": 0.1, "y": 0.5, "color": "#f093fb", "icon": "📥", "size": 50},
-        {"name": "🧹 Limpeza<br>de Dados", "x": 0.25, "y": 0.8, "color": "#667eea", "icon": "🧹", "size": 45},
-        {"name": "🔧 Feature<br>Engineering", "x": 0.4, "y": 0.8, "color": "#764ba2", "icon": "🔧", "size": 45},
+        {"name": "📥 Dados<br>Brutos", "x": 0.1, "y": 0.5, "color": "#a4a8ff", "icon": "📥", "size": 50},
+        {"name": "🧹 Limpeza<br>de Dados", "x": 0.25, "y": 0.8, "color": "#5559ff", "icon": "🧹", "size": 45},
+        {"name": "🔧 Feature<br>Engineering", "x": 0.4, "y": 0.8, "color": "#7b7fff", "icon": "🔧", "size": 45},
         {"name": "📊 Train/Test<br>Split", "x": 0.55, "y": 0.5, "color": "#4facfe", "icon": "📊", "size": 48},
-        {"name": "🤖 Treinamento<br>de Modelos", "x": 0.7, "y": 0.2, "color": "#f093fb", "icon": "🤖", "size": 55},
+        {"name": "🤖 Treinamento<br>de Modelos", "x": 0.7, "y": 0.2, "color": "#a4a8ff", "icon": "🤖", "size": 55},
         {"name": "✅ Validação<br>Cruzada", "x": 0.7, "y": 0.8, "color": "#4ade80", "icon": "✅", "size": 45},
         {"name": "💾 Modelo<br>Salvo", "x": 0.9, "y": 0.5, "color": "#fbbf24", "icon": "💾", "size": 50},
     ]
@@ -3657,11 +3932,11 @@ def update_pipeline_visualizations(tab):
     
     # 2. Etapas com Tempo de Execução (Visual Melhorado)
     stages_data = [
-        {"name": "📥 Carregamento", "time": 0.5, "status": "✓", "color": "#f093fb"},
-        {"name": "🧹 Limpeza", "time": 1.2, "status": "✓", "color": "#667eea"},
-        {"name": "🔧 Feature Eng.", "time": 2.3, "status": "✓", "color": "#764ba2"},
+        {"name": "📥 Carregamento", "time": 0.5, "status": "✓", "color": "#a4a8ff"},
+        {"name": "🧹 Limpeza", "time": 1.2, "status": "✓", "color": "#5559ff"},
+        {"name": "🔧 Feature Eng.", "time": 2.3, "status": "✓", "color": "#7b7fff"},
         {"name": "📊 Split", "time": 0.8, "status": "✓", "color": "#4facfe"},
-        {"name": "🤖 Treinamento", "time": 15.4, "status": "✓", "color": "#f093fb"},
+        {"name": "🤖 Treinamento", "time": 15.4, "status": "✓", "color": "#a4a8ff"},
         {"name": "✅ Validação", "time": 3.2, "status": "✓", "color": "#4ade80"},
         {"name": "💾 Salvamento", "time": 0.6, "status": "✓", "color": "#fbbf24"}
     ]
@@ -3711,9 +3986,9 @@ def update_pipeline_visualizations(tab):
     
     # 3. Comparação de Modelos (Visual Premium)
     models_data = [
-        {"name": "🌲 Random Forest", "accuracy": 96.63, "time": 12.3, "color": "#667eea"},
-        {"name": "🚀 Gradient Boost", "accuracy": 97.98, "time": 15.6, "color": "#764ba2"},
-        {"name": "🎯 SVM", "accuracy": 98.65, "time": 8.9, "color": "#f093fb"},
+        {"name": "🌲 Random Forest", "accuracy": 96.63, "time": 12.3, "color": "#5559ff"},
+        {"name": "🚀 Gradient Boost", "accuracy": 97.98, "time": 15.6, "color": "#7b7fff"},
+        {"name": "🎯 SVM", "accuracy": 98.65, "time": 8.9, "color": "#a4a8ff"},
         {"name": "📈 Logistic Reg", "accuracy": 97.98, "time": 5.4, "color": "#4facfe"},
         {"name": "🔮 K-Means", "accuracy": None, "time": 3.2, "color": "#4ade80"}
     ]
@@ -3801,10 +4076,10 @@ def update_pipeline_visualizations(tab):
         x=epochs, y=train_acc,
         mode='lines+markers',
         name='📊 Treino',
-        line=dict(color='#f093fb', width=4, shape='spline'),
+        line=dict(color='#a4a8ff', width=4, shape='spline'),
         marker=dict(size=10, symbol='circle', line=dict(color='white', width=2)),
         fill='tonexty',
-        fillcolor='rgba(240, 147, 251, 0.2)',
+        fillcolor='rgba(164, 168, 255, 0.2)',
         hovertemplate='<b>Época %{x}</b><br>🎯 Acurácia: %{y:.2%}<extra></extra>'
     ))
     
