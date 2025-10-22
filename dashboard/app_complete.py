@@ -177,6 +177,36 @@ app.index_string = '''
                 background-color: #252a48 !important;
             }
             
+            /* Custom dropdown styles */
+            .custom-dropdown .Select-value-label,
+            .custom-dropdown .Select-placeholder,
+            .custom-dropdown input {
+                color: #e8eaf6 !important;
+            }
+            
+            .custom-dropdown .Select-value {
+                background-color: rgba(102, 126, 234, 0.2) !important;
+                border-color: rgba(102, 126, 234, 0.4) !important;
+                color: #e8eaf6 !important;
+            }
+            
+            .custom-dropdown .Select-input input {
+                color: #e8eaf6 !important;
+            }
+            
+            /* Estilo para o dropdown do Dash/React-Select */
+            div[class*="css-"] input {
+                color: #e8eaf6 !important;
+            }
+            
+            div[class*="singleValue"] {
+                color: #e8eaf6 !important;
+            }
+            
+            div[class*="placeholder"] {
+                color: rgba(232, 234, 246, 0.6) !important;
+            }
+            
             /* Tabs animation */
             ._dash-undo-redo {
                 display: none;
@@ -993,14 +1023,14 @@ def create_eda_layout():
         
         # Painel de Filtros Climáticos
         html.Div([
-            html.H5('⚙️ Filtros de Perfil Climático', style={
+            html.H5('⚙️ Filtros de Perfil Climático e Demográfico', style={
                 'color': COLORS['text'],
                 'marginBottom': '20px',
                 'fontSize': '1.2em',
                 'fontWeight': '600'
             }),
             
-            # Filtros em linha
+            # Primeira linha de filtros - Climáticos
             html.Div([
                 # Temperatura
                 html.Div([
@@ -1105,6 +1135,61 @@ def create_eda_layout():
                 ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
             ]),
             
+            # Segunda linha de filtros - Demográficos
+            html.Div([
+                # Gênero
+                html.Div([
+                    html.Label('👤 Gênero', style={
+                        'color': COLORS['text'],
+                        'fontWeight': '600',
+                        'display': 'block',
+                        'marginBottom': '8px'
+                    }),
+                    dcc.Dropdown(
+                        id='gender-filter',
+                        options=[
+                            {'label': '👨 Masculino', 'value': 1},
+                            {'label': '👩 Feminino', 'value': 0},
+                            {'label': '✨ Todos', 'value': 'todos'}
+                        ],
+                        value='todos',
+                        clearable=False,
+                        style={
+                            'color': '#e8eaf6',
+                            'backgroundColor': COLORS['secondary']
+                        },
+                        className='custom-dropdown'
+                    )
+                ], style={'width': '31%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
+                
+                # Faixa Etária
+                html.Div([
+                    html.Label('🎂 Faixa Etária', style={
+                        'color': COLORS['text'],
+                        'fontWeight': '600',
+                        'display': 'block',
+                        'marginBottom': '8px'
+                    }),
+                    dcc.Dropdown(
+                        id='age-filter',
+                        options=[
+                            {'label': '👶 Crianças (0-12)', 'value': 'crianca'},
+                            {'label': '🧒 Adolescentes (13-17)', 'value': 'adolescente'},
+                            {'label': '👨 Adultos (18-59)', 'value': 'adulto'},
+                            {'label': '👴 Idosos (60+)', 'value': 'idoso'},
+                            {'label': '✨ Todos', 'value': 'todos'}
+                        ],
+                        value='todos',
+                        clearable=False,
+                        style={
+                            'color': '#e8eaf6',
+                            'backgroundColor': COLORS['secondary']
+                        },
+                        className='custom-dropdown'
+                    )
+                ], style={'width': '31%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
+            ], style={'marginTop': '10px'}),
+            
             # Indicador de registros filtrados
             html.Div(id='filter-stats', style={
                 'marginTop': '15px',
@@ -1164,8 +1249,8 @@ def create_eda_layout():
                       }),
             dcc.Dropdown(
                 id='symptom-selector',
-                options=[{'label': s, 'value': s} for s in symptom_cols[:20]],
-                value=symptom_cols[:4] if len(symptom_cols) >= 4 else symptom_cols,
+                options=[{'label': s, 'value': s} for s in symptom_cols if 'HIV' not in s.upper() and 'AIDS' not in s.upper()][:20],
+                value=[s for s in symptom_cols if 'HIV' not in s.upper() and 'AIDS' not in s.upper()][:4],
                 multi=True,
                 placeholder='Selecione sintomas...',
                 style={
@@ -1310,7 +1395,8 @@ def update_correlation_matrix(tab):
         features_to_correlate = list(set(top_features + climatic_vars + ['Idade']))
         features_to_correlate = [f for f in features_to_correlate if f in df_global.columns]
     else:
-        features_to_correlate = climatic_vars + ['Idade'] + symptom_cols[:10]
+        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
+        features_to_correlate = climatic_vars + ['Idade'] + symptom_cols_filtered[:10]
     
     corr_matrix = df_global[features_to_correlate].corr()
     
@@ -1523,8 +1609,11 @@ def update_symptom_heatmap(tab):
         return go.Figure()
     
     try:
+        # Filtrar HIV/AIDS dos sintomas
+        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
+        
         # Agrupar sintomas por diagnóstico
-        symptom_by_diagnosis = df_global.groupby('Diagnóstico')[symptom_cols].sum()
+        symptom_by_diagnosis = df_global.groupby('Diagnóstico')[symptom_cols_filtered].sum()
         
         # Selecionar top 15 sintomas mais frequentes
         top_symptoms = symptom_by_diagnosis.sum().sort_values(ascending=False).head(15).index
@@ -1591,8 +1680,11 @@ def update_diagnosis_by_symptom(tab):
         return go.Figure()
     
     try:
+        # Filtrar HIV/AIDS dos sintomas
+        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
+        
         # Selecionar top 10 sintomas mais comuns
-        symptom_totals = df_global[symptom_cols].sum().sort_values(ascending=False).head(10)
+        symptom_totals = df_global[symptom_cols_filtered].sum().sort_values(ascending=False).head(10)
         top_10_symptoms = symptom_totals.index.tolist()
         
         # Criar subplots para cada sintoma
@@ -1716,11 +1808,13 @@ def update_symptom_importance(tab):
     [Input('temp-profile-filter', 'value'),
      Input('humidity-profile-filter', 'value'),
      Input('wind-profile-filter', 'value'),
+     Input('gender-filter', 'value'),
+     Input('age-filter', 'value'),
      Input('view-type-filter', 'value'),
      Input('tabs', 'value')]
 )
-def update_climate_explorer(temp_profile, humidity_profile, wind_profile, view_type, tab):
-    """Atualiza explorador interativo de perfis climáticos"""
+def update_climate_explorer(temp_profile, humidity_profile, wind_profile, gender, age_group, view_type, tab):
+    """Atualiza explorador interativo de perfis climáticos e demográficos"""
     load_data_and_models()
     
     if tab != 'tab-eda':
@@ -1763,6 +1857,25 @@ def update_climate_explorer(temp_profile, humidity_profile, wind_profile, view_t
     elif wind_profile == 'baixo':
         df_filtered = df_filtered[df_filtered['Velocidade do Vento (km/h)'] < 5]
         filter_labels.append('🌿 Vento Baixo')
+    
+    # Filtro de Gênero
+    if gender != 'todos':
+        df_filtered = df_filtered[df_filtered['Gênero'] == gender]
+        filter_labels.append(f'{"👨 Masculino" if gender == 1 else "👩 Feminino"}')
+    
+    # Filtro de Idade
+    if age_group == 'crianca':
+        df_filtered = df_filtered[df_filtered['Idade'] <= 12]
+        filter_labels.append('👶 Crianças')
+    elif age_group == 'adolescente':
+        df_filtered = df_filtered[(df_filtered['Idade'] >= 13) & (df_filtered['Idade'] <= 17)]
+        filter_labels.append('🧒 Adolescentes')
+    elif age_group == 'adulto':
+        df_filtered = df_filtered[(df_filtered['Idade'] >= 18) & (df_filtered['Idade'] <= 59)]
+        filter_labels.append('👨 Adultos')
+    elif age_group == 'idoso':
+        df_filtered = df_filtered[df_filtered['Idade'] >= 60]
+        filter_labels.append('👴 Idosos')
     
     # Estatísticas do filtro
     total_original = len(df_global)
@@ -1821,8 +1934,9 @@ def update_climate_explorer(temp_profile, humidity_profile, wind_profile, view_t
         )
         
     else:  # sintomas
-        # Top 10 sintomas mais frequentes
-        symptom_sums = df_filtered[symptom_cols].sum().sort_values(ascending=False).head(10)
+        # Top 10 sintomas mais frequentes (excluindo HIV/AIDS)
+        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
+        symptom_sums = df_filtered[symptom_cols_filtered].sum().sort_values(ascending=False).head(10)
         
         main_fig = go.Figure()
         main_fig.add_trace(go.Bar(
@@ -1940,9 +2054,10 @@ def update_climate_explorer(temp_profile, humidity_profile, wind_profile, view_t
             margin=dict(t=50, b=60, l=60, r=30)
         )
     else:
-        # Para sintomas, mostrar média de sintomas por faixas climáticas
+        # Para sintomas, mostrar média de sintomas por faixas climáticas (excluindo HIV/AIDS)
+        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
         temp_bins = pd.cut(df_filtered['Temperatura (°C)'], bins=5)
-        avg_symptoms = df_filtered.groupby(temp_bins)[symptom_cols[:10]].mean().mean(axis=1)
+        avg_symptoms = df_filtered.groupby(temp_bins)[symptom_cols_filtered[:10]].mean().mean(axis=1)
         
         corr_fig = go.Figure()
         corr_fig.add_trace(go.Scatter(
@@ -3044,7 +3159,7 @@ def create_prediction_layout():
                                 'fontWeight': 'bold', 'marginTop': '20px'}),
                 dcc.Checklist(
                     id='symptom-checklist',
-                    options=[{'label': f' {s}', 'value': s} for s in symptom_cols[:30]],
+                    options=[{'label': f' {s}', 'value': s} for s in symptom_cols if 'HIV' not in s.upper() and 'AIDS' not in s.upper()][:30],
                     value=[],
                     style={'color': COLORS['text'], 'columnCount': 3, 'marginTop': '15px'},
                     labelStyle={'display': 'block', 'marginBottom': '10px'}
