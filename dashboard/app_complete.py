@@ -717,6 +717,84 @@ def create_ml_layout():
             ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
         ]),
         
+        # ==================== CLUSTERIZAÇÃO POR PERFIS CLIMÁTICOS ====================
+        html.Div([
+            html.H3('🌤️ Clusterização por Perfis Climáticos', style={
+                'color': COLORS['text'], 
+                'marginTop': '50px',
+                'marginBottom': '10px',
+                'fontSize': '1.8em',
+                'fontWeight': '700',
+                'borderLeft': f'6px solid {COLORS["warning"]}',
+                'paddingLeft': '15px',
+                'background': f'linear-gradient(90deg, rgba(251, 191, 36, 0.1) 0%, transparent 100%)'
+            }),
+            html.P('Agrupamento baseado em condições climáticas (temperatura, umidade e vento)', style={
+                'color': COLORS['text_secondary'],
+                'fontSize': '1em',
+                'marginBottom': '25px',
+                'paddingLeft': '21px'
+            })
+        ]),
+        
+        # Controle de K (número de clusters)
+        html.Div([
+            create_card([
+                html.Label('🔢 Número de Clusters (K):', style={
+                    'color': COLORS['text'],
+                    'fontWeight': '600',
+                    'display': 'block',
+                    'marginBottom': '12px',
+                    'fontSize': '1.1em'
+                }),
+                dcc.Slider(
+                    id='climate-k-slider',
+                    min=4,
+                    max=6,
+                    step=1,
+                    value=5,
+                    marks={i: {'label': str(i), 'style': {'color': COLORS['text'], 'fontSize': '1.1em', 'fontWeight': '600'}} for i in range(4, 7)},
+                    tooltip={"placement": "bottom", "always_visible": True}
+                ),
+                html.Div(id='climate-k-info', style={
+                    'marginTop': '20px',
+                    'padding': '15px',
+                    'backgroundColor': COLORS['background'],
+                    'borderRadius': '8px',
+                    'color': COLORS['text_secondary'],
+                    'borderLeft': f'4px solid {COLORS["accent"]}'
+                })
+            ])
+        ], style={'marginBottom': '30px'}),
+        
+        # Visualizações dos perfis climáticos
+        html.Div([
+            create_card([dcc.Graph(id='climate-clusters-3d')], 
+                       'Clusters Climáticos em 3D (Temperatura, Umidade, Vento)')
+        ]),
+        
+        html.Div([
+            html.Div([
+                create_card([dcc.Graph(id='climate-clusters-2d')], 
+                           'Projeção 2D dos Perfis Climáticos (PCA)')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+            
+            html.Div([
+                create_card([dcc.Graph(id='climate-profiles-radar')], 
+                           'Características dos Perfis Climáticos')
+            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='climate-profiles-table')], 
+                       'Descrição dos Perfis Climáticos')
+        ]),
+        
+        html.Div([
+            create_card([dcc.Graph(id='climate-diagnosis-distribution')], 
+                       'Distribuição de Diagnósticos por Perfil Climático')
+        ]),
+        
         html.Div([
             create_card([dcc.Graph(id='classification-performance-graph')], 
                        'Performance da Classificação por Classe')
