@@ -1,29 +1,16 @@
 # Dependências do Projeto VitaNimbus - Weather Related Disease Prediction
 
 # Core Data Science
-pandas>=2.1.0
-numpy>=1.24.0
-scipy>=1.10.0
+pandas==2.3.3
+numpy==2.3.4
+scipy==1.16.2
 
 # Machine Learning
-scikit-learn>=1.3.0
-joblib>=1.3.0
+scikit-learn==1.7.2
+joblib==1.5.2
 
 # Visualização e Dashboard
-dash>=2.14.0
-plotly>=5.18.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
-
-# API
-flask>=3.0.0
-flask-cors>=4.0.0
-
-# Jupyter e Notebooks
-jupyter>=1.0.0
-notebook>=7.0.0
-ipykernel>=6.25.0
-
-# Utilities
-python-dateutil>=2.8.0
-pytz>=2023.3
+dash==3.2.0
+plotly==6.3.1
+matplotlib==3.10.7
+seaborn==0.13.2

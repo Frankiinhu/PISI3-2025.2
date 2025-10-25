@@ -1,120 +1,112 @@
+import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 """
 Dashboard Principal - NimbusVita (Versão Completa com Callbacks)
 Análise Exploratória de Doenças Relacionadas ao Clima
 """
+from typing import Any
+
 import dash
-from dash import dcc, html, Input, Output
+from dash import Input, Output, dcc, html
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import pandas as pd
 import numpy as np
-import sys
-import os
-from typing import Tuple
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
-# Adicionar diretório src ao path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from dashboard.components import create_card
+from dashboard.core.data_context import (
+    get_cluster_feature_frame,
+    get_context,
+    has_feature_importances,
+    is_classifier_available,
+)
 
-from src.data_processing.data_loader import DataLoader
-from src.data_processing.eda import ExploratoryDataAnalysis
-from src.models.classifier import DiagnosisClassifier
-from src.models.clustering import DiseaseClusterer
+# Cluster utilities ------------------------------------------------------
 
-# Variáveis globais que serão carregadas sob demanda
-df_global = None
-eda_global = None
-classifier = None
-clusterer = None
-loader = None
-symptom_cols = []
-diagnosis_cols = []
-climatic_vars = []
+_CACHED_ELBOW_K: int | None = None
 
-def load_data_and_models():
-    """Carrega dados e modelos apenas uma vez"""
-    global df_global, eda_global, classifier, clusterer, loader, symptom_cols, diagnosis_cols, climatic_vars
-    
-    if df_global is not None:
-        return  # Já carregado
-    
-    print("Carregando dados...")
-    data_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'DATASET FINAL WRDP.csv')
-    loader = DataLoader(data_path)
-    df_global = loader.get_clean_data()
-    eda_global = ExploratoryDataAnalysis(df_global)
-    
-    # Obter feature names
-    feature_dict = loader.get_feature_names()
-    symptom_cols = feature_dict.get('symptoms', [])
-    # Compatibilidade: alguns loaders usam 'target' ao invés de 'diagnosis'
-    diagnosis_cols = feature_dict.get('diagnosis', []) or [feature_dict.get('target', 'Diagnóstico')]
-    climatic_vars = feature_dict.get('climatic', [])
-    
-    # Carregar modelos localmente (fallback). Preferir uso da API quando disponível.
-    print("Carregando modelos locais (fallback)...")
-    classifier = DiagnosisClassifier()
-    clusterer = DiseaseClusterer()
 
+def _error_figure(message: str) -> go.Figure:
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref='paper',
+        yref='paper',
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font=dict(size=14, color=COLORS['text'])
+    )
+    fig.update_layout(plot_bgcolor=COLORS['background'], paper_bgcolor=COLORS['card'])
+    return fig
+
+
+def _prepare_cluster_dataset() -> tuple[Any, pd.DataFrame, np.ndarray]:
+    ctx = get_context()
     try:
-        classifier_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'saved_models', 'classifier_model.pkl')
-        classifier.load_model(classifier_path)
-        print("✓ Classificador local carregado")
-    except Exception as e:
-        print(f"⚠ Classificador local não carregado: {e}")
-
-    try:
-        clusterer_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'saved_models', 'clustering_model.pkl')
-        clusterer.load_model(clusterer_path)
-        print("✓ Clusterizador local carregado")
-    except Exception as e:
-        print(f"⚠ Clusterizador local não carregado: {e}")
-
-# Funções auxiliares de verificação
-def is_classifier_available():
-    """Verifica se o classifier está disponível e carregado"""
-    return classifier is not None and hasattr(classifier, 'model') and classifier.model is not None
-
-
-def has_feature_importances():
-    """Verifica se o classifier tem feature importances"""
-    return classifier is not None and hasattr(classifier, 'feature_importances') and classifier.feature_importances is not None
-
-
-def get_cluster_feature_frame() -> pd.DataFrame:
-    """Retorna DataFrame ordenado com as features usadas pelo clusterizador."""
-    if clusterer is None or getattr(clusterer, 'feature_names', None) is None:
-        raise ValueError('Clusterizador indisponível ou sem feature names; execute o treinamento e carregue o modelo salvo.')
-
-    if df_global is None:
-        raise ValueError('Dados não carregados; garanta que load_data_and_models() foi executado.')
-
-    numeric_df = df_global.select_dtypes(include=[np.number])
-    missing = [col for col in clusterer.feature_names if col not in numeric_df.columns]
-    if missing:
-        missing_str = ', '.join(missing)
-        raise ValueError(f'Colunas ausentes no dataset atual para reconstruir os clusters: {missing_str}')
-
-    return numeric_df.loc[:, clusterer.feature_names]
-
-
-def get_cluster_features_and_labels() -> Tuple[pd.DataFrame, pd.Series]:
-    """Retorna as features numéricas alinhadas e os clusters previstos."""
-    if clusterer is None or getattr(clusterer, 'model', None) is None:
-        raise ValueError('Clusterizador não carregado; execute o treinamento antes de gerar visualizações.')
-
-    feature_frame = get_cluster_feature_frame()
-
-    try:
-        labels = clusterer.predict_cluster(feature_frame.values)
+        feature_frame = get_cluster_feature_frame()
     except ValueError as exc:
-        raise ValueError(f'Não foi possível gerar previsões de cluster: {exc}') from exc
+        raise RuntimeError(str(exc)) from exc
 
-    return feature_frame, pd.Series(labels, index=feature_frame.index, name='Cluster')
+    scaler = getattr(ctx.clusterer, 'scaler', None)
+    if scaler is None:
+        raise RuntimeError('Clusterizador sem scaler configurado; execute o treinamento do modelo.')
 
-# Inicializar app
+    X_scaled = scaler.transform(feature_frame)
+    return ctx, feature_frame, X_scaled
+
+
+def _fit_kmeans_labels(X_scaled: np.ndarray, n_clusters: int) -> np.ndarray:
+    model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    return model.fit_predict(X_scaled)
+
+
+def _get_elbow_k(X_scaled: np.ndarray) -> int:
+    global _CACHED_ELBOW_K
+    if _CACHED_ELBOW_K is not None:
+        return _CACHED_ELBOW_K
+
+    max_k = min(10, X_scaled.shape[0])
+    scanned_ks: list[int] = []
+    inertias: list[float] = []
+
+    for k in range(2, max_k):
+        if k >= X_scaled.shape[0]:
+            break
+        model = KMeans(n_clusters=k, random_state=42, n_init=10)
+        model.fit(X_scaled)
+        scanned_ks.append(k)
+        inertias.append(float(model.inertia_))
+
+    if not inertias:
+        _CACHED_ELBOW_K = 3
+        return _CACHED_ELBOW_K
+
+    if len(inertias) < 3:
+        _CACHED_ELBOW_K = scanned_ks[-1]
+        return _CACHED_ELBOW_K
+
+    second_diff = np.diff(inertias, n=2)
+    idx = int(np.argmin(second_diff)) + 2
+    if idx >= len(scanned_ks):
+        idx = len(scanned_ks) - 1
+
+    _CACHED_ELBOW_K = scanned_ks[idx]
+    return _CACHED_ELBOW_K
+
+from dashboard.core.theme import COLORS, INDEX_STRING, metrics_unavailable_figure
+from dashboard.views import eda, overview
+
+
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "NimbusVita - Análise de Doenças Climáticas"
+app.index_string = INDEX_STRING
 
 # CSS customizado para melhorar a aparência
 app.index_string = '''
@@ -450,48 +442,6 @@ app.index_string = '''
 </html>
 '''
 
-# Cores e estilo - Tema NimbusVita
-COLORS = {
-    'background': '#0a0e27',
-    'background_light': '#1a1f3a',
-    'primary': '#5559ff',
-    'primary_light': '#7b7fff',
-    'primary_dark': '#3d41cc',
-    'secondary': '#131829',
-    'secondary_light': '#f5d76e',
-    'secondary_dark': '#d1974b',
-    'text': '#e8eaf6',
-    'text_secondary': '#9fa8da',
-    'accent': '#a4a8ff',
-    'accent_light': '#c4c7ff',
-    'accent_secondary': '#4facfe',
-    'card': '#1e2139',
-    'card_hover': '#252a48',
-    'success': '#4ade80',
-    'warning': '#fbbf24',
-    'error': '#f87171',
-    'border': '#2d3250'
-}
-
-def metrics_unavailable_figure(message: str = 'Execute o treinamento e salve o modelo para visualizar as métricas registradas.') -> go.Figure:
-    """Cria figura padrão quando as métricas não estão disponíveis."""
-    fig = go.Figure()
-    fig.add_annotation(
-        text=message,
-        xref='paper', yref='paper',
-        x=0.5, y=0.5,
-        showarrow=False,
-        font=dict(size=16, color=COLORS['text'], family='Inter, sans-serif')
-    )
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font=dict(color=COLORS['text'], family='Inter, sans-serif'),
-        margin=dict(t=40, b=40, l=40, r=40),
-        height=400
-    )
-    return fig
-
 # Layout principal
 app.layout = html.Div(style={
     'backgroundColor': COLORS['background'], 
@@ -633,1911 +583,21 @@ app.layout = html.Div(style={
               Input('tabs', 'value'))
 def render_content(tab):
     """Renderiza conteúdo baseado na tab selecionada"""
-    load_data_and_models()  # Garante que dados estão carregados
-    
     if tab == 'tab-overview':
-        return create_overview_layout()
+        return overview.create_layout()
     elif tab == 'tab-eda':
-        return create_eda_layout()
+        return eda.create_layout()
     elif tab == 'tab-ml':
         return create_ml_layout()
     elif tab == 'tab-pipeline':
         return create_pipeline_layout()
 
 
-def create_card(children, title=None):
-    """Cria um card estilizado com design moderno"""
-    content = []
-    if title:
-        content.append(html.H3(title, style={
-            'color': COLORS['text'], 
-            'marginBottom': '20px',
-            'fontSize': '1.3em',
-            'fontWeight': '600',
-            'borderBottom': f'2px solid {COLORS["accent"]}',
-            'paddingBottom': '10px',
-            'background': f'linear-gradient(90deg, {COLORS["accent"]} 0%, transparent 100%)',
-            'WebkitBackgroundClip': 'text',
-            'WebkitTextFillColor': 'transparent',
-            'backgroundClip': 'text'
-        }))
-    content.extend(children if isinstance(children, list) else [children])
-    
-    return html.Div(
-        content,
-        style={
-            'backgroundColor': COLORS['card'],
-            'padding': '25px',
-            'borderRadius': '15px',
-            'marginBottom': '25px',
-            'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-            'border': f'1px solid {COLORS["border"]}',
-            'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
-            'position': 'relative',
-            'overflow': 'hidden'
-        },
-        className='card-hover'
-    )
-
-
-def create_overview_layout():
-    """Layout da visão geral"""
-    info = eda_global.basic_info()
-    
-    # Estatísticas básicas com design moderno
-    stats_cards = html.Div([
-        html.Div([
-            html.Div([
-                html.Div([
-                    html.Div('📊', style={'fontSize': '2.5em', 'marginBottom': '10px'}),
-                    html.H4('Total de Registros', style={
-                        'color': COLORS['text_secondary'], 
-                        'margin': '0', 
-                        'fontSize': '0.9em',
-                        'fontWeight': '500',
-                        'textTransform': 'uppercase',
-                        'letterSpacing': '0.5px'
-                    }),
-                    html.H2(f"{info['shape'][0]:,}", style={
-                        'color': COLORS['accent'], 
-                        'margin': '15px 0 0 0',
-                        'fontSize': '2.5em',
-                        'fontWeight': '700',
-                        'background': f'linear-gradient(135deg, {COLORS["accent"]} 0%, {COLORS["accent_secondary"]} 100%)',
-                        'WebkitBackgroundClip': 'text',
-                        'WebkitTextFillColor': 'transparent'
-                    }),
-                ], style={
-                    'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-                    'padding': '30px 20px', 
-                    'borderRadius': '15px', 
-                    'textAlign': 'center', 
-                    'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-                    'border': f'1px solid {COLORS["border"]}',
-                    'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
-                    'cursor': 'pointer'
-                })
-            ], style={'width': '100%'}, className='stat-card'),
-        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-        
-        html.Div([
-            html.Div([
-                html.Div([
-                    html.Div('🏥', style={'fontSize': '2.5em', 'marginBottom': '10px'}),
-                    html.H4('Diagnósticos Únicos', style={
-                        'color': COLORS['text_secondary'], 
-                        'margin': '0', 
-                        'fontSize': '0.9em',
-                        'fontWeight': '500',
-                        'textTransform': 'uppercase',
-                        'letterSpacing': '0.5px'
-                    }),
-                    html.H2(f"{df_global['Diagnóstico'].nunique()}", style={
-                        'color': COLORS['success'], 
-                        'margin': '15px 0 0 0',
-                        'fontSize': '2.5em',
-                        'fontWeight': '700'
-                    }),
-                ], style={
-                    'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-                    'padding': '30px 20px', 
-                    'borderRadius': '15px',
-                    'textAlign': 'center', 
-                    'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-                    'border': f'1px solid {COLORS["border"]}',
-                    'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
-                    'cursor': 'pointer'
-                })
-            ], style={'width': '100%'}, className='stat-card'),
-        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-        
-        html.Div([
-            html.Div([
-                html.Div([
-                    html.Div('📈', style={'fontSize': '2.5em', 'marginBottom': '10px'}),
-                    html.H4('Total de Features', style={
-                        'color': COLORS['text_secondary'], 
-                        'margin': '0', 
-                        'fontSize': '0.9em',
-                        'fontWeight': '500',
-                        'textTransform': 'uppercase',
-                        'letterSpacing': '0.5px'
-                    }),
-                    html.H2(f"{info['shape'][1]}", style={
-                        'color': COLORS['primary'], 
-                        'margin': '15px 0 0 0',
-                        'fontSize': '2.5em',
-                        'fontWeight': '700'
-                    }),
-                ], style={
-                    'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-                    'padding': '30px 20px', 
-                    'borderRadius': '15px',
-                    'textAlign': 'center', 
-                    'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-                    'border': f'1px solid {COLORS["border"]}',
-                    'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
-                    'cursor': 'pointer'
-                })
-            ], style={'width': '100%'}, className='stat-card'),
-        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-        
-        html.Div([
-            html.Div([
-                html.Div([
-                    html.Div('🔬', style={'fontSize': '2.5em', 'marginBottom': '10px'}),
-                    html.H4('Sintomas Analisados', style={
-                        'color': COLORS['text_secondary'], 
-                        'margin': '0', 
-                        'fontSize': '0.9em',
-                        'fontWeight': '500',
-                        'textTransform': 'uppercase',
-                        'letterSpacing': '0.5px'
-                    }),
-                    html.H2(f"{len(symptom_cols)}", style={
-                        'color': COLORS['warning'], 
-                        'margin': '15px 0 0 0',
-                        'fontSize': '2.5em',
-                        'fontWeight': '700'
-                    }),
-                ], style={
-                    'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-                    'padding': '30px 20px', 
-                    'borderRadius': '15px',
-                    'textAlign': 'center', 
-                    'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-                    'border': f'1px solid {COLORS["border"]}',
-                    'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
-                    'cursor': 'pointer'
-                })
-            ], style={'width': '100%'}, className='stat-card'),
-        ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-    ], style={'marginBottom': '30px'})
-    
-    return html.Div([
-        html.Div([
-            html.H2('Visão Geral do Dataset', style={
-                'color': COLORS['text'], 
-                'marginBottom': '10px',
-                'fontSize': '2em',
-                'fontWeight': '700'
-            }),
-            html.P('Estatísticas e distribuições principais do conjunto de dados', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '30px'
-            })
-        ]),
-        
-        stats_cards,
-        
-        html.Div([
-            html.Div([
-                create_card([dcc.Graph(id='diagnosis-count-graph')], 'Distribuição de Diagnósticos')
-            ], style={'width': '100%', 'padding': '10px'}),
-        ]),
-        
-        html.Div([
-            html.Div([
-                create_card([dcc.Graph(id='age-distribution-graph')], 'Distribuição de Idade')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-            
-            html.Div([
-                create_card([dcc.Graph(id='climate-vars-distribution')], 'Variáveis Climáticas')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-        ]),
-    ])
-
-
-@app.callback(
-    Output('diagnosis-count-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_diagnosis_count(tab):
-    """Atualiza gráfico de contagem de diagnósticos"""
-    load_data_and_models()
-    if tab != 'tab-overview':
-        return go.Figure()
-    
-    diag_counts = df_global['Diagnóstico'].value_counts().reset_index()
-    diag_counts.columns = ['Diagnóstico', 'Contagem']
-    
-    fig = px.bar(diag_counts, x='Diagnóstico', y='Contagem',
-                 title='',
-                 color='Contagem',
-                 color_continuous_scale='Blues')
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor='rgba(0,0,0,0)',
-        font_color=COLORS['text'],
-        xaxis_title='Diagnóstico',
-        yaxis_title='Número de Casos',
-        showlegend=False,
-        xaxis_tickangle=-45,
-        font=dict(family="Inter, sans-serif", size=12),
-        title_font=dict(size=16, color=COLORS['text']),
-        xaxis=dict(gridcolor=COLORS['border'], showgrid=True),
-        yaxis=dict(gridcolor=COLORS['border'], showgrid=True),
-        margin=dict(t=30, b=80, l=60, r=30)
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('age-distribution-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_age_distribution(tab):
-    """Atualiza distribuição de idade"""
-    load_data_and_models()
-    if tab != 'tab-overview':
-        return go.Figure()
-    
-    fig = px.histogram(df_global, x='Idade', nbins=30,
-                      title='',
-                      color_discrete_sequence=[COLORS['accent']])
-    
-    mean_age = df_global['Idade'].mean()
-    fig.add_vline(x=mean_age, line_dash="dash", line_color="red",
-                  annotation_text=f"Média: {mean_age:.1f} anos")
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Idade (anos)',
-        yaxis_title='Frequência',
-        showlegend=False
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('climate-vars-distribution', 'figure'),
-    Input('tabs', 'value')
-)
-def update_climate_distribution(tab):
-    """Atualiza distribuição de variáveis climáticas"""
-    load_data_and_models()
-    if tab != 'tab-overview':
-        return go.Figure()
-    
-    fig = make_subplots(rows=3, cols=1,
-                       subplot_titles=climatic_vars)
-    
-    colors = [COLORS['primary'], COLORS['accent'], '#FF6B6B']
-    
-    for i, var in enumerate(climatic_vars, 1):
-        fig.add_trace(
-            go.Histogram(x=df_global[var], name=var, marker_color=colors[i-1]),
-            row=i, col=1
-        )
-    
-    fig.update_layout(
-        height=600,
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        showlegend=False
-    )
-    
-    return fig
-
-
-def create_eda_layout():
-    """Layout da análise exploratória unificada"""
-    return html.Div([
-        html.Div([
-            html.H2('Análise Exploratória de Dados', style={
-                'color': COLORS['text'], 
-                'marginBottom': '10px',
-                'fontSize': '2em',
-                'fontWeight': '700'
-            }),
-            html.P('Explore correlações e padrões nos dados através de visualizações interativas', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '40px'
-            })
-        ]),
-        
-        # ==================== ANÁLISE UNIVARIADA ====================
-        html.Div([
-            html.H3('📊 Análise Univariada', style={
-                'color': COLORS['text'], 
-                'marginBottom': '10px',
-                'fontSize': '1.8em',
-                'fontWeight': '700',
-                'borderLeft': f'6px solid {COLORS["accent"]}',
-                'paddingLeft': '15px',
-                'background': f'linear-gradient(90deg, rgba(240, 147, 251, 0.1) 0%, transparent 100%)'
-            }),
-            html.P('Análise de distribuição individual de variáveis', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '25px',
-                'paddingLeft': '21px'
-            })
-        ]),
-        
-        # Gráficos de distribuição individual
-        html.Div([
-            html.Div([
-                create_card([dcc.Graph(id='age-dist-univariate')], 
-                           'Distribuição de Idade')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-            
-            html.Div([
-                create_card([dcc.Graph(id='gender-dist-univariate')], 
-                           'Distribuição de Gênero')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-        ]),
-        
-        html.Div([
-            html.Div([
-                create_card([dcc.Graph(id='temp-dist-univariate')], 
-                           'Distribuição de Temperatura')
-            ], style={'width': '32%', 'display': 'inline-block', 'padding': '10px'}),
-            
-            html.Div([
-                create_card([dcc.Graph(id='humidity-dist-univariate')], 
-                           'Distribuição de Umidade')
-            ], style={'width': '32%', 'display': 'inline-block', 'padding': '10px'}),
-            
-            html.Div([
-                create_card([dcc.Graph(id='wind-dist-univariate')], 
-                           'Distribuição de Velocidade do Vento')
-            ], style={'width': '32%', 'display': 'inline-block', 'padding': '10px'}),
-        ]),
-        
-        # ==================== ANÁLISE BIVARIADA ====================
-        html.Div([
-            html.H3('🔗 Análise Bivariada', style={
-                'color': COLORS['text'], 
-                'marginTop': '50px',
-                'marginBottom': '10px',
-                'fontSize': '1.8em',
-                'fontWeight': '700',
-                'borderLeft': f'6px solid {COLORS["primary"]}',
-                'paddingLeft': '15px',
-                'background': f'linear-gradient(90deg, rgba(102, 126, 234, 0.1) 0%, transparent 100%)'
-            }),
-            html.P('Análise de relações entre pares de variáveis', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '25px',
-                'paddingLeft': '21px'
-            })
-        ]),
-        
-        # Seção: Clima vs Diagnóstico (Bivariada)
-        html.Div([
-            html.H4('🌡️ Variáveis Climáticas vs Diagnóstico', style={
-                'color': COLORS['text'], 
-                'marginBottom': '20px',
-                'fontSize': '1.4em',
-                'fontWeight': '600',
-                'paddingLeft': '10px'
-            })
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='temp-diagnosis-graph')], 
-                       'Temperatura vs Diagnóstico')
-        ]),
-        
-        html.Div([
-            html.Div([
-                create_card([dcc.Graph(id='humidity-diagnosis-graph')], 
-                           'Umidade vs Diagnóstico')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-            
-            html.Div([
-                create_card([dcc.Graph(id='wind-diagnosis-graph')], 
-                           'Velocidade do Vento vs Diagnóstico')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-        ]),
-        
-        # Seção: Sintomas vs Diagnóstico (Bivariada)
-        html.Div([
-            html.H4('🩺 Correlação Sintomas vs Diagnóstico', style={
-                'color': COLORS['text'], 
-                'marginTop': '30px',
-                'marginBottom': '20px',
-                'fontSize': '1.4em',
-                'fontWeight': '600',
-                'paddingLeft': '10px'
-            }),
-            html.P('Matriz de correlação mostrando a relação entre sintomas e diagnósticos', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '0.95em',
-                'marginBottom': '20px',
-                'paddingLeft': '10px'
-            })
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='symptom-diagnosis-correlation')], 
-                       'Matriz de Correlação: Sintomas x Diagnósticos')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='correlation-matrix-graph')], 
-                       'Matriz de Correlação (Top Features)')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='age-temp-distribution')], 
-                       'Distribuição Etária por Faixa de Temperatura')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='wind-respiratory-scatter')], 
-                       'Regressão: Velocidade do Vento vs Sintomas Respiratórios')
-        ]),
-        
-        # Explorador Interativo de Perfis Climáticos
-        html.Div([
-            html.H4('🔍 Explorador Interativo de Perfis Climáticos', style={
-                'color': COLORS['text'], 
-                'marginTop': '30px',
-                'marginBottom': '20px',
-                'fontSize': '1.4em',
-                'fontWeight': '600',
-                'paddingLeft': '10px'
-            }),
-            html.P('Filtre condições climáticas para observar sintomas e diagnósticos específicos', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '0.95em',
-                'marginBottom': '20px',
-                'paddingLeft': '10px'
-            })
-        ]),
-        
-        # Painel de Filtros Climáticos
-        html.Div([
-            html.H5('⚙️ Filtros de Perfil Climático e Demográfico', style={
-                'color': COLORS['text'],
-                'marginBottom': '20px',
-                'fontSize': '1.2em',
-                'fontWeight': '600'
-            }),
-            
-            # Primeira linha de filtros - Climáticos
-            html.Div([
-                # Temperatura
-                html.Div([
-                    html.Label('🌡️ Temperatura', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='temp-profile-filter',
-                        options=[
-                            {'label': '🔥 Alto (>25°C)', 'value': 'alto'},
-                            {'label': '🌤️ Médio (18-25°C)', 'value': 'medio'},
-                            {'label': '❄️ Baixo (<18°C)', 'value': 'baixo'},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-                
-                # Umidade
-                html.Div([
-                    html.Label('💧 Umidade', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='humidity-profile-filter',
-                        options=[
-                            {'label': '💦 Alto (>0.7)', 'value': 'alto'},
-                            {'label': '💧 Médio (0.4-0.7)', 'value': 'medio'},
-                            {'label': '🏜️ Baixo (<0.4)', 'value': 'baixo'},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-                
-                # Vento
-                html.Div([
-                    html.Label('💨 Vento', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='wind-profile-filter',
-                        options=[
-                            {'label': '🌪️ Alto (>15 km/h)', 'value': 'alto'},
-                            {'label': '🍃 Médio (5-15 km/h)', 'value': 'medio'},
-                            {'label': '🌿 Baixo (<5 km/h)', 'value': 'baixo'},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-                
-                # Tipo de Visualização
-                html.Div([
-                    html.Label('📊 Visualizar', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='view-type-filter',
-                        options=[
-                            {'label': '🩺 Diagnósticos', 'value': 'diagnosticos'},
-                            {'label': '💊 Sintomas (Top 10)', 'value': 'sintomas'}
-                        ],
-                        value='diagnosticos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '23%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-            ]),
-            
-            # Segunda linha de filtros - Demográficos
-            html.Div([
-                # Gênero
-                html.Div([
-                    html.Label('👤 Gênero', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='gender-filter',
-                        options=[
-                            {'label': '👨 Masculino', 'value': 1},
-                            {'label': '👩 Feminino', 'value': 0},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '31%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-                
-                # Faixa Etária
-                html.Div([
-                    html.Label('🎂 Faixa Etária', style={
-                        'color': COLORS['text'],
-                        'fontWeight': '600',
-                        'display': 'block',
-                        'marginBottom': '8px'
-                    }),
-                    dcc.Dropdown(
-                        id='age-filter',
-                        options=[
-                            {'label': '👶 Crianças (0-12)', 'value': 'crianca'},
-                            {'label': '🧒 Adolescentes (13-17)', 'value': 'adolescente'},
-                            {'label': '👨 Adultos (18-59)', 'value': 'adulto'},
-                            {'label': '👴 Idosos (60+)', 'value': 'idoso'},
-                            {'label': '✨ Todos', 'value': 'todos'}
-                        ],
-                        value='todos',
-                        clearable=False,
-                        style={
-                            'color': '#e8eaf6',
-                            'backgroundColor': COLORS['secondary']
-                        },
-                        className='custom-dropdown'
-                    )
-                ], style={'width': '31%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
-            ], style={'marginTop': '10px'}),
-            
-            # Indicador de registros filtrados
-            html.Div(id='filter-stats', style={
-                'marginTop': '15px',
-                'padding': '15px',
-                'backgroundColor': COLORS['background'],
-                'borderRadius': '8px',
-                'borderLeft': f'4px solid {COLORS["accent"]}'
-            })
-            
-        ], style={
-            'marginBottom': '30px',
-            'padding': '25px',
-            'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-            'borderRadius': '15px',
-            'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-            'border': f'1px solid {COLORS["border"]}'
-        }),
-        
-        # Gráficos do Explorador
-        html.Div([
-            create_card([dcc.Graph(id='climate-explorer-graph')], 
-                       'Incidência por Perfil Climático')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='climate-correlation-graph')], 
-                       'Correlação com Condições Climáticas')
-        ]),
-        
-        # Seção: Sintomas vs Diagnóstico (Bivariada)
-        html.Div([
-            html.H4('🩺 Sintomas vs Diagnóstico', style={
-                'color': COLORS['text'], 
-                'marginTop': '30px',
-                'marginBottom': '20px',
-                'fontSize': '1.4em',
-                'fontWeight': '600',
-                'paddingLeft': '10px'
-            })
-        ]),
-        
-        html.Div([
-            html.Label('Selecione Sintomas para Análise:', 
-                      style={
-                          'color': COLORS['text'], 
-                          'fontSize': '1em', 
-                          'marginBottom': '12px',
-                          'display': 'block',
-                          'fontWeight': '600'
-                      }),
-            dcc.Dropdown(
-                id='symptom-selector',
-                options=[{'label': s, 'value': s} for s in symptom_cols if 'HIV' not in s.upper() and 'AIDS' not in s.upper()][:20],
-                value=[s for s in symptom_cols if 'HIV' not in s.upper() and 'AIDS' not in s.upper()][:4],
-                multi=True,
-                placeholder='Selecione sintomas...',
-                style={
-                    'backgroundColor': COLORS['secondary'], 
-                    'color': COLORS['text'],
-                    'borderRadius': '8px'
-                }
-            )
-        ], style={
-            'marginBottom': '30px', 
-            'padding': '25px', 
-            'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-            'borderRadius': '15px',
-            'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-            'border': f'1px solid {COLORS["border"]}'
-        }),
-        
-        html.Div([
-            create_card([dcc.Graph(id='symptom-frequency-graphs')], 
-                       'Frequência de Sintomas por Diagnóstico')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='diagnosis-by-symptom-graph')], 
-                       'Diagnóstico por Sintoma (Top 10 Sintomas)')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='symptom-importance-graph')], 
-                       'Top 15 Sintomas por Importância')
-        ]),
-        
-        # ==================== ANÁLISE MULTIVARIADA ====================
-        html.Div([
-            html.H3('🎯 Análise Multivariada', style={
-                'color': COLORS['text'], 
-                'marginTop': '50px',
-                'marginBottom': '10px',
-                'fontSize': '1.8em',
-                'fontWeight': '700',
-                'borderLeft': f'6px solid {COLORS["accent_secondary"]}',
-                'paddingLeft': '15px',
-                'background': f'linear-gradient(90deg, rgba(79, 172, 254, 0.1) 0%, transparent 100%)'
-            }),
-            html.P('Análise de relações complexas entre múltiplas variáveis', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '25px',
-                'paddingLeft': '21px'
-            })
-        ]),
-        
-        # Placeholder para análises multivariadas futuras
-        html.Div([
-            create_card([
-                html.Div([
-                    html.P('🔮 Análises de PCA, Clustering e outras técnicas multivariadas virão aqui', style={
-                        'color': COLORS['text_secondary'],
-                        'textAlign': 'center',
-                        'padding': '40px',
-                        'fontSize': '1.1em'
-                    })
-                ])
-            ], 'Análises Avançadas')
-        ]),
-    ])
-
-
-@app.callback(
-    Output('symptom-frequency-graphs', 'figure'),
-    [Input('symptom-selector', 'value'),
-     Input('tabs', 'value')]
-)
-def update_symptom_frequency(selected_symptoms, tab):
-    """Atualiza gráficos de frequência de sintomas"""
-    load_data_and_models()
-    if tab != 'tab-eda' or not selected_symptoms:
-        return go.Figure()
-    
-    # Criar subplots
-    n_symptoms = len(selected_symptoms)
-    rows = (n_symptoms + 1) // 2
-    
-    fig = make_subplots(
-        rows=rows, cols=2,
-        subplot_titles=selected_symptoms,
-        vertical_spacing=0.15,
-        horizontal_spacing=0.1
-    )
-    
-    for idx, symptom in enumerate(selected_symptoms):
-        if symptom in df_global.columns:
-            freq = df_global.groupby('Diagnóstico')[symptom].sum().reset_index()
-            freq.columns = ['Diagnóstico', 'Contagem']
-            
-            row = idx // 2 + 1
-            col = idx % 2 + 1
-            
-            fig.add_trace(
-                go.Bar(x=freq['Diagnóstico'], y=freq['Contagem'], 
-                      name=symptom, showlegend=False,
-                      marker_color=COLORS['accent']),
-                row=row, col=col
-            )
-    
-    fig.update_layout(
-        height=300 * rows,
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text']
-    )
-    
-    fig.update_xaxes(tickangle=-45)
-    
-    return fig
-
-
-@app.callback(
-    Output('correlation-matrix-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_correlation_matrix(tab):
-    """Atualiza matriz de correlação"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    # Definir features base na ordem específica
-    base_features = ['Idade', 'Gênero', 'Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
-    
-    # Verificar quais features base existem no dataset
-    available_base = [f for f in base_features if f in df_global.columns]
-    
-    # Selecionar top 10 features adicionais
-    if has_feature_importances():
-        # Usar feature importance se disponível
-        # Excluir as features base da seleção
-        feature_importance_filtered = classifier.feature_importances[~classifier.feature_importances.index.isin(base_features)]
-        top_additional = feature_importance_filtered.head(10).index.tolist()
-    else:
-        # Usar sintomas mais frequentes (sem HIV/AIDS e sem features base)
-        symptom_cols_filtered = [col for col in symptom_cols 
-                                if 'HIV' not in col.upper() 
-                                and 'AIDS' not in col.upper()
-                                and col not in base_features]
-        symptom_sums = df_global[symptom_cols_filtered].sum().sort_values(ascending=False)
-        top_additional = symptom_sums.head(10).index.tolist()
-    
-    # Combinar: features base + top 10 adicionais
-    features_to_correlate = available_base + top_additional
-    
-    # Calcular matriz de correlação
-    corr_matrix = df_global[features_to_correlate].corr()
-    
-    fig = go.Figure(data=go.Heatmap(
-        z=corr_matrix.values,
-        x=corr_matrix.columns,
-        y=corr_matrix.index,
-        colorscale='RdBu_r',
-        zmid=0,
-        text=corr_matrix.values.round(2),
-        texttemplate='%{text}',
-        textfont={"size": 8},
-        colorbar=dict(title='Correlação')
-    ))
-    
-    fig.update_layout(
-        height=600,
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis={'side': 'bottom'},
-        yaxis={'side': 'left'}
-    )
-    
-    fig.update_xaxes(tickangle=-45)
-    
-    return fig
-
-
-@app.callback(
-    Output('age-temp-distribution', 'figure'),
-    Input('tabs', 'value')
-)
-def update_age_temp_distribution(tab):
-    """Atualiza gráfico de distribuição etária por faixa de temperatura"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    # Criar faixas de temperatura
-    df_temp = df_global.copy()
-    df_temp['Faixa Temperatura'] = pd.cut(
-        df_temp['Temperatura (°C)'],
-        bins=[0, 15, 20, 25, 30, 100],
-        labels=['Muito Baixa (<15°C)', 'Baixa (15-20°C)', 'Média (20-25°C)', 'Alta (25-30°C)', 'Muito Alta (>30°C)']
-    )
-    
-    # Criar faixas etárias
-    df_temp['Faixa Etária'] = pd.cut(
-        df_temp['Idade'],
-        bins=[0, 18, 30, 45, 60, 100],
-        labels=['0-18', '19-30', '31-45', '46-60', '60+']
-    )
-    
-    # Contar distribuição
-    distribution = df_temp.groupby(['Faixa Temperatura', 'Faixa Etária']).size().reset_index(name='Contagem')
-    
-    # Criar gráfico de barras agrupadas
-    fig = go.Figure()
-    
-    faixas_etarias = ['0-18', '19-30', '31-45', '46-60', '60+']
-    colors = [COLORS['primary'], COLORS['primary_light'], COLORS['accent'], COLORS['accent_secondary'], COLORS['secondary']]
-    
-    for i, faixa in enumerate(faixas_etarias):
-        data = distribution[distribution['Faixa Etária'] == faixa]
-        fig.add_trace(go.Bar(
-            x=data['Faixa Temperatura'],
-            y=data['Contagem'],
-            name=faixa,
-            marker_color=colors[i % len(colors)],
-            text=data['Contagem'],
-            textposition='outside'
-        ))
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Faixa de Temperatura',
-        yaxis_title='Número de Pacientes',
-        barmode='group',
-        legend=dict(
-            title='Faixa Etária',
-            orientation='h',
-            yanchor='bottom',
-            y=1.02,
-            xanchor='right',
-            x=1
-        ),
-        height=500,
-        margin=dict(t=80)
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('wind-respiratory-scatter', 'figure'),
-    Input('tabs', 'value')
-)
-def update_wind_respiratory_scatter(tab):
-    """Atualiza scatterplot de regressão: velocidade do vento vs sintomas respiratórios"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    # Definir sintomas respiratórios
-    respiratory_symptoms = ['Coriza', 'Tosse', 'Dor de Garganta', 'Congestão Nasal', 
-                           'Dificuldade Respiratória', 'Chiado no Peito']
-    
-    # Filtrar apenas sintomas respiratórios que existem no dataset
-    available_respiratory = [s for s in respiratory_symptoms if s in df_global.columns]
-    
-    if not available_respiratory:
-        # Se não houver sintomas respiratórios específicos, retornar figura vazia
-        fig = go.Figure()
-        fig.add_annotation(
-            text="Sintomas respiratórios não encontrados no dataset",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text_secondary'])
-        )
-        fig.update_layout(
-            plot_bgcolor=COLORS['background'],
-            paper_bgcolor=COLORS['card']
-        )
-        return fig
-    
-    # Calcular frequência média de sintomas respiratórios por paciente
-    df_scatter = df_global.copy()
-    df_scatter['Freq_Respiratórios'] = df_scatter[available_respiratory].sum(axis=1) / len(available_respiratory)
-    
-    # Criar bins de velocidade do vento para melhor visualização
-    df_scatter['Wind_Bins'] = pd.cut(df_scatter['Velocidade do Vento (km/h)'], bins=20)
-    wind_resp_grouped = df_scatter.groupby('Wind_Bins').agg({
-        'Freq_Respiratórios': 'mean',
-        'Velocidade do Vento (km/h)': 'mean'
-    }).reset_index()
-    
-    # Remover NaN
-    wind_resp_grouped = wind_resp_grouped.dropna()
-    
-    # Calcular regressão linear
-    from numpy import polyfit, poly1d
-    x = wind_resp_grouped['Velocidade do Vento (km/h)'].values
-    y = wind_resp_grouped['Freq_Respiratórios'].values
-    
-    # Coeficientes da regressão
-    coef = polyfit(x, y, 1)
-    poly_func = poly1d(coef)
-    y_pred = poly_func(x)
-    
-    # Calcular R²
-    from numpy import corrcoef
-    correlation_matrix = corrcoef(y, y_pred)
-    r_squared = correlation_matrix[0, 1] ** 2
-    
-    # Criar figura
-    fig = go.Figure()
-    
-    # Adicionar pontos do scatter
-    fig.add_trace(go.Scatter(
-        x=x,
-        y=y,
-        mode='markers',
-        name='Dados',
-        marker=dict(
-            size=10,
-            color=COLORS['primary'],
-            opacity=0.6,
-            line=dict(color='white', width=1)
-        ),
-        hovertemplate='<b>Vento:</b> %{x:.1f} km/h<br><b>Freq. Sintomas:</b> %{y:.2%}<extra></extra>'
-    ))
-    
-    # Adicionar linha de regressão
-    fig.add_trace(go.Scatter(
-        x=x,
-        y=y_pred,
-        mode='lines',
-        name=f'Regressão Linear (R²={r_squared:.3f})',
-        line=dict(
-            color=COLORS['accent'],
-            width=3,
-            dash='dash'
-    ),
-    hovertemplate='<b>Vento:</b> %{x:.1f} km/h<br><b>Taxa estimada:</b> %{y:.2%}<extra></extra>'
-    ))
-    
-    # Adicionar equação da reta
-    equation_text = f'y = {coef[0]:.4f}x + {coef[1]:.4f}<br>R² = {r_squared:.3f}'
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Velocidade do Vento (km/h)',
-        yaxis_title='Frequência Média de Sintomas Respiratórios',
-        legend=dict(
-            orientation='h',
-            yanchor='bottom',
-            y=1.02,
-            xanchor='right',
-            x=1
-        ),
-        annotations=[
-            dict(
-                text=equation_text,
-                xref='paper', yref='paper',
-                x=0.05, y=0.95,
-                showarrow=False,
-                bgcolor='rgba(255, 255, 255, 0.1)',
-                bordercolor=COLORS['border'],
-                borderwidth=1,
-                borderpad=10,
-                font=dict(size=12, color=COLORS['text'])
-            )
-        ],
-        height=500
-    )
-    
-    # Formatar eixo Y como percentual
-    fig.update_yaxes(tickformat='.0%')
-    
-    return fig
-
-
-def create_climate_layout():
-    """Layout de análise climática"""
-    return html.Div([
-        html.Div([
-            html.H2('Relação entre Clima e Diagnósticos', style={
-                'color': COLORS['text'], 
-                'marginBottom': '10px',
-                'fontSize': '2em',
-                'fontWeight': '700'
-            }),
-            html.P('Análise da influência das variáveis climáticas nos diferentes diagnósticos', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '30px'
-            })
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='temp-diagnosis-graph')], 
-                       'Temperatura vs Diagnóstico')
-        ]),
-        
-        html.Div([
-            html.Div([
-                create_card([dcc.Graph(id='humidity-diagnosis-graph')], 
-                           'Umidade vs Diagnóstico')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-            
-            html.Div([
-                create_card([dcc.Graph(id='wind-diagnosis-graph')], 
-                           'Velocidade do Vento vs Diagnóstico')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-        ]),
-    ])
-
-
-@app.callback(
-    Output('temp-diagnosis-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_temp_diagnosis(tab):
-    """Atualiza gráfico temperatura vs diagnóstico"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    fig = px.box(df_global, x='Diagnóstico', y='Temperatura (°C)',
-                 title='',
-                 color_discrete_sequence=[COLORS['accent']])
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        showlegend=False,
-        xaxis_tickangle=-45,
-        xaxis=dict(gridcolor=COLORS['border']),
-        yaxis=dict(gridcolor=COLORS['border'])
-    )
-    
-    # Atualizar cor das caixas
-    fig.update_traces(
-        marker=dict(color=COLORS['accent'], line=dict(color=COLORS['accent'], width=2)),
-        fillcolor='rgba(240, 147, 251, 0.5)',
-        line=dict(color=COLORS['accent'])
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('humidity-diagnosis-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_humidity_diagnosis(tab):
-    """Atualiza gráfico umidade vs diagnóstico"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    fig = px.box(df_global, x='Diagnóstico', y='Umidade',
-                 title='',
-                 color_discrete_sequence=[COLORS['primary']])
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        showlegend=False,
-        xaxis_tickangle=-45,
-        xaxis=dict(gridcolor=COLORS['border']),
-        yaxis=dict(gridcolor=COLORS['border'])
-    )
-    
-    # Atualizar cor das caixas
-    fig.update_traces(
-        marker=dict(color=COLORS['primary'], line=dict(color=COLORS['primary'], width=2)),
-        fillcolor='rgba(102, 126, 234, 0.5)',
-        line=dict(color=COLORS['primary'])
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('wind-diagnosis-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_wind_diagnosis(tab):
-    """Atualiza gráfico vento vs diagnóstico"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    fig = px.box(df_global, x='Diagnóstico', y='Velocidade do Vento (km/h)',
-                 title='',
-                 color_discrete_sequence=[COLORS['accent_secondary']])
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        showlegend=False,
-        xaxis_tickangle=-45,
-        xaxis=dict(gridcolor=COLORS['border']),
-        yaxis=dict(gridcolor=COLORS['border'])
-    )
-    
-    # Atualizar cor das caixas
-    fig.update_traces(
-        marker=dict(color=COLORS['accent_secondary'], line=dict(color=COLORS['accent_secondary'], width=2)),
-        fillcolor='rgba(79, 172, 254, 0.5)',
-        line=dict(color=COLORS['accent_secondary'])
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('symptom-diagnosis-correlation', 'figure'),
-    Input('tabs', 'value')
-)
-def update_symptom_diagnosis_correlation(tab):
-    """Atualiza matriz de correlação sintoma x diagnóstico"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    try:
-        print("=== DEBUG: Iniciando matriz de correlação ===")
-        print(f"Total de colunas de sintomas: {len(symptom_cols)}")
-        
-        # Filtrar sintomas (remover HIV/AIDS)
-        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
-        print(f"Sintomas filtrados (sem HIV/AIDS): {len(symptom_cols_filtered)}")
-        
-        if not symptom_cols_filtered:
-            print("ERRO: Nenhum sintoma disponível!")
-            return go.Figure()
-        
-        # Selecionar top 20 sintomas mais frequentes
-        symptom_sums = df_global[symptom_cols_filtered].sum().sort_values(ascending=False)
-        top_symptoms = symptom_sums.head(20).index.tolist()
-        print(f"Top 20 sintomas: {top_symptoms[:5]}...")  # Mostra os 5 primeiros
-        
-        # Criar matriz de correlação: para cada diagnóstico, calcular a proporção de cada sintoma
-        diagnoses = sorted(df_global['Diagnóstico'].unique())
-        print(f"Diagnósticos encontrados: {diagnoses}")
-        
-        correlation_matrix = []
-        
-        for diagnosis in diagnoses:
-            diagnosis_df = df_global[df_global['Diagnóstico'] == diagnosis]
-            print(f"Diagnóstico '{diagnosis}': {len(diagnosis_df)} pacientes")
-            
-            symptom_proportions = []
-            
-            for symptom in top_symptoms:
-                if symptom in diagnosis_df.columns:
-                    # Proporção de pacientes com esse diagnóstico que têm esse sintoma
-                    proportion = diagnosis_df[symptom].mean()
-                    symptom_proportions.append(proportion)
-                else:
-                    symptom_proportions.append(0)
-            
-            print(f"  Proporções (primeiras 5): {symptom_proportions[:5]}")
-            correlation_matrix.append(symptom_proportions)
-        
-        print(f"Matriz criada: {len(correlation_matrix)} linhas x {len(correlation_matrix[0]) if correlation_matrix else 0} colunas")
-        
-        # Formatar nomes dos sintomas
-        symptom_names = [s.replace('_', ' ').title() for s in top_symptoms]
-        
-        # Criar heatmap com escala de cores adequada
-        fig = go.Figure(data=go.Heatmap(
-            z=correlation_matrix,
-            x=symptom_names,
-            y=diagnoses,
-            colorscale='Blues',  # Usar escala de cores padrão do Plotly
-            colorbar=dict(
-                title=dict(
-                    text='Proporção',
-                    side='right'
-                ),
-                tickmode='linear',
-                tick0=0,
-                dtick=0.2,
-                tickfont=dict(color=COLORS['text'])
-            ),
-            hovertemplate='<b>Diagnóstico:</b> %{y}<br><b>Sintoma:</b> %{x}<br><b>Proporção:</b> %{z:.1%}<extra></extra>',
-            zmid=0.5,  # Ponto médio da escala
-            zmin=0,
-            zmax=1
-        ))
-        
-        fig.update_layout(
-            plot_bgcolor=COLORS['background'],
-            paper_bgcolor=COLORS['card'],
-            font_color=COLORS['text'],
-            xaxis_title='Sintomas',
-            yaxis_title='Diagnósticos',
-            xaxis=dict(
-                tickangle=-45,
-                tickfont=dict(size=10),
-                gridcolor=COLORS['border'],
-                showgrid=False
-            ),
-            yaxis=dict(
-                tickfont=dict(size=11),
-                gridcolor=COLORS['border'],
-                showgrid=False
-            ),
-            height=600,
-            margin=dict(l=150, r=100, t=50, b=150)
-        )
-        
-        print("=== DEBUG: Matriz criada com sucesso ===")
-        return fig
-        
-    except Exception as e:
-        print(f"ERRO ao criar matriz de correlação: {e}")
-        import traceback
-        traceback.print_exc()
-        return go.Figure()
-
-
-# ==================== CALLBACKS PARA ANÁLISE UNIVARIADA ====================
-
-@app.callback(
-    Output('age-dist-univariate', 'figure'),
-    Input('tabs', 'value')
-)
-def update_age_dist_univariate(tab):
-    """Atualiza distribuição de idade (univariada)"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    fig = px.histogram(df_global, x='Idade', nbins=30,
-                      title='',
-                      color_discrete_sequence=[COLORS['primary']])
-    
-    mean_age = df_global['Idade'].mean()
-    median_age = df_global['Idade'].median()
-    
-    fig.add_vline(x=mean_age, line_dash="dash", line_color=COLORS['accent'],
-                  annotation_text=f"Média: {mean_age:.1f}", annotation_position="top right")
-    fig.add_vline(x=median_age, line_dash="dot", line_color=COLORS['accent_secondary'],
-                  annotation_text=f"Mediana: {median_age:.1f}", annotation_position="bottom right")
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Idade (anos)',
-        yaxis_title='Frequência',
-        showlegend=False,
-        xaxis=dict(gridcolor=COLORS['border']),
-        yaxis=dict(gridcolor=COLORS['border'])
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('gender-dist-univariate', 'figure'),
-    Input('tabs', 'value')
-)
-def update_gender_dist_univariate(tab):
-    """Atualiza distribuição de gênero (univariada)"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    gender_counts = df_global['Gênero'].value_counts().reset_index()
-    gender_counts.columns = ['Gênero', 'Contagem']
-    gender_counts['Gênero'] = gender_counts['Gênero'].map({0: 'Feminino', 1: 'Masculino'})
-    
-    fig = px.bar(gender_counts, x='Gênero', y='Contagem',
-                 title='',
-                 color='Gênero',
-                 color_discrete_map={'Feminino': COLORS['accent'], 'Masculino': COLORS['primary']})
-    
-    # Adicionar valores nas barras
-    fig.update_traces(texttemplate='%{y}', textposition='outside')
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Gênero',
-        yaxis_title='Contagem',
-        showlegend=False,
-        xaxis=dict(gridcolor=COLORS['border']),
-        yaxis=dict(gridcolor=COLORS['border'])
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('temp-dist-univariate', 'figure'),
-    Input('tabs', 'value')
-)
-def update_temp_dist_univariate(tab):
-    """Atualiza distribuição de temperatura (univariada)"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    fig = px.histogram(df_global, x='Temperatura (°C)', nbins=30,
-                      title='',
-                      color_discrete_sequence=[COLORS['accent']])
-    
-    mean_temp = df_global['Temperatura (°C)'].mean()
-    fig.add_vline(x=mean_temp, line_dash="dash", line_color=COLORS['primary'],
-                  annotation_text=f"Média: {mean_temp:.1f}°C", annotation_position="top right")
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Temperatura (°C)',
-        yaxis_title='Frequência',
-        showlegend=False,
-        xaxis=dict(gridcolor=COLORS['border']),
-        yaxis=dict(gridcolor=COLORS['border'])
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('humidity-dist-univariate', 'figure'),
-    Input('tabs', 'value')
-)
-def update_humidity_dist_univariate(tab):
-    """Atualiza distribuição de umidade (univariada)"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    fig = px.histogram(df_global, x='Umidade', nbins=30,
-                      title='',
-                      color_discrete_sequence=[COLORS['primary']])
-    
-    mean_humidity = df_global['Umidade'].mean()
-    fig.add_vline(x=mean_humidity, line_dash="dash", line_color=COLORS['accent'],
-                  annotation_text=f"Média: {mean_humidity:.2f}", annotation_position="top right")
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Umidade',
-        yaxis_title='Frequência',
-        showlegend=False,
-        xaxis=dict(gridcolor=COLORS['border']),
-        yaxis=dict(gridcolor=COLORS['border'])
-    )
-    
-    return fig
-
-
-@app.callback(
-    Output('wind-dist-univariate', 'figure'),
-    Input('tabs', 'value')
-)
-def update_wind_dist_univariate(tab):
-    """Atualiza distribuição de velocidade do vento (univariada)"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    fig = px.histogram(df_global, x='Velocidade do Vento (km/h)', nbins=30,
-                      title='',
-                      color_discrete_sequence=[COLORS['accent_secondary']])
-    
-    mean_wind = df_global['Velocidade do Vento (km/h)'].mean()
-    fig.add_vline(x=mean_wind, line_dash="dash", line_color=COLORS['primary'],
-                  annotation_text=f"Média: {mean_wind:.1f} km/h", annotation_position="top right")
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Velocidade do Vento (km/h)',
-        yaxis_title='Frequência',
-        showlegend=False,
-        xaxis=dict(gridcolor=COLORS['border']),
-        yaxis=dict(gridcolor=COLORS['border'])
-    )
-    
-    return fig
-
-
-def create_symptoms_layout():
-    """Layout de análise de sintomas"""
-    return html.Div([
-        html.Div([
-            html.H2('Análise de Sintomas', style={
-                'color': COLORS['text'], 
-                'marginBottom': '10px',
-                'fontSize': '2em',
-                'fontWeight': '700'
-            }),
-            html.P('Mapeamento detalhado de sintomas e sua relação com diagnósticos', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '30px'
-            })
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='diagnosis-by-symptom-graph')], 
-                       'Diagnóstico por Sintoma (Top 10 Sintomas)')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='symptom-importance-graph')], 
-                       'Top 15 Sintomas por Importância')
-        ]),
-    ])
-
-
-@app.callback(
-    Output('diagnosis-by-symptom-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_diagnosis_by_symptom(tab):
-    """Atualiza gráfico de diagnóstico por sintoma (inverso)"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    try:
-        # Filtrar HIV/AIDS dos sintomas
-        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
-        
-        # Selecionar top 10 sintomas mais comuns
-        symptom_totals = df_global[symptom_cols_filtered].sum().sort_values(ascending=False).head(10)
-        top_10_symptoms = symptom_totals.index.tolist()
-        
-        # Criar subplots para cada sintoma
-        fig = make_subplots(
-            rows=5, cols=2,
-            subplot_titles=[f'<b>{s}</b>' for s in top_10_symptoms],
-            vertical_spacing=0.1,
-            horizontal_spacing=0.15
-        )
-        
-        # Gradiente de cores moderno (paleta NimbusVita)
-        colors = ['#5559ff', '#7b7fff', '#a4a8ff', '#4facfe', '#00c9a7', 
-                  '#fbbf24', '#f87171', '#4ade80', '#60a5fa', '#a78bfa']
-        
-        for idx, symptom in enumerate(top_10_symptoms):
-            # Contar diagnósticos para pacientes com este sintoma
-            patients_with_symptom = df_global[df_global[symptom] == 1]
-            diagnosis_counts = patients_with_symptom['Diagnóstico'].value_counts()
-            
-            row = idx // 2 + 1
-            col = idx % 2 + 1
-            
-            fig.add_trace(
-                go.Bar(
-                    x=diagnosis_counts.index, 
-                    y=diagnosis_counts.values,
-                    name=symptom,
-                    showlegend=False,
-                    marker=dict(
-                        color=colors[idx % len(colors)],
-                        line=dict(color=COLORS['border'], width=1)
-                    ),
-                    text=diagnosis_counts.values,
-                    textposition='outside',
-                    textfont=dict(size=10, color=COLORS['text']),
-                    hovertemplate='<b>%{x}</b><br>Casos: %{y}<extra></extra>'
-                ),
-                row=row, col=col
-            )
-            
-            # Ajustar ângulo dos labels do eixo x e estilo
-            fig.update_xaxes(
-                tickangle=-45, 
-                row=row, 
-                col=col,
-                gridcolor=COLORS['border'],
-                showgrid=False,
-                tickfont=dict(size=9)
-            )
-            fig.update_yaxes(
-                row=row, 
-                col=col,
-                gridcolor=COLORS['border'],
-                showgrid=True,
-                tickfont=dict(size=9)
-            )
-        
-        fig.update_layout(
-            height=1400,
-            plot_bgcolor=COLORS['background'],
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Inter, sans-serif", color=COLORS['text']),
-            title_text='<b>Distribuição de Diagnósticos por Sintoma</b>',
-            title_x=0.5,
-            title_font=dict(size=18, color=COLORS['text']),
-            margin=dict(t=80, b=60, l=60, r=60)
-        )
-        
-        return fig
-    except Exception as e:
-        print(f"Erro no gráfico de diagnóstico por sintoma: {e}")
-        return go.Figure().add_annotation(
-            text=f"Erro ao gerar gráfico: {str(e)}",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
-
-
-@app.callback(
-    Output('symptom-importance-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_symptom_importance(tab):
-    """Atualiza gráfico de importância de sintomas"""
-    load_data_and_models()
-    if tab != 'tab-eda':
-        return go.Figure()
-    
-    if classifier is None or not hasattr(classifier, 'feature_importances') or classifier.feature_importances is None:
-        return go.Figure()
-    
-    top_features = classifier.feature_importances.head(15)
-    
-    fig = px.bar(x=top_features.values, y=top_features.index,
-                 orientation='h',
-                 title='',
-                 color=top_features.values,
-                 color_continuous_scale='Blues')
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Importância',
-        yaxis_title='Feature',
-        showlegend=False,
-        yaxis={'categoryorder': 'total ascending'}
-    )
-    
-    return fig
-
-
-# ==================== CALLBACKS DO EXPLORADOR CLIMÁTICO ====================
-
-@app.callback(
-    [Output('filter-stats', 'children'),
-     Output('climate-explorer-graph', 'figure'),
-     Output('climate-correlation-graph', 'figure')],
-    [Input('temp-profile-filter', 'value'),
-     Input('humidity-profile-filter', 'value'),
-     Input('wind-profile-filter', 'value'),
-     Input('gender-filter', 'value'),
-     Input('age-filter', 'value'),
-     Input('view-type-filter', 'value'),
-     Input('tabs', 'value')]
-)
-def update_climate_explorer(temp_profile, humidity_profile, wind_profile, gender, age_group, view_type, tab):
-    """Atualiza explorador interativo de perfis climáticos e demográficos"""
-    load_data_and_models()
-    
-    if tab != 'tab-eda':
-        return html.Div(), go.Figure(), go.Figure()
-    
-    # Aplicar filtros climáticos
-    df_filtered = df_global.copy()
-    filter_conditions = []
-    filter_labels = []
-    
-    # Filtro de Temperatura
-    if temp_profile == 'alto':
-        df_filtered = df_filtered[df_filtered['Temperatura (°C)'] > 25]
-        filter_labels.append('🔥 Temperatura Alta')
-    elif temp_profile == 'medio':
-        df_filtered = df_filtered[(df_filtered['Temperatura (°C)'] >= 18) & (df_filtered['Temperatura (°C)'] <= 25)]
-        filter_labels.append('🌤️ Temperatura Média')
-    elif temp_profile == 'baixo':
-        df_filtered = df_filtered[df_filtered['Temperatura (°C)'] < 18]
-        filter_labels.append('❄️ Temperatura Baixa')
-    
-    # Filtro de Umidade
-    if humidity_profile == 'alto':
-        df_filtered = df_filtered[df_filtered['Umidade'] > 0.7]
-        filter_labels.append('💦 Umidade Alta')
-    elif humidity_profile == 'medio':
-        df_filtered = df_filtered[(df_filtered['Umidade'] >= 0.4) & (df_filtered['Umidade'] <= 0.7)]
-        filter_labels.append('💧 Umidade Média')
-    elif humidity_profile == 'baixo':
-        df_filtered = df_filtered[df_filtered['Umidade'] < 0.4]
-        filter_labels.append('🏜️ Umidade Baixa')
-    
-    # Filtro de Vento
-    if wind_profile == 'alto':
-        df_filtered = df_filtered[df_filtered['Velocidade do Vento (km/h)'] > 15]
-        filter_labels.append('🌪️ Vento Alto')
-    elif wind_profile == 'medio':
-        df_filtered = df_filtered[(df_filtered['Velocidade do Vento (km/h)'] >= 5) & (df_filtered['Velocidade do Vento (km/h)'] <= 15)]
-        filter_labels.append('🍃 Vento Médio')
-    elif wind_profile == 'baixo':
-        df_filtered = df_filtered[df_filtered['Velocidade do Vento (km/h)'] < 5]
-        filter_labels.append('🌿 Vento Baixo')
-    
-    # Filtro de Gênero
-    if gender != 'todos':
-        df_filtered = df_filtered[df_filtered['Gênero'] == gender]
-        filter_labels.append(f'{"👨 Masculino" if gender == 1 else "👩 Feminino"}')
-    
-    # Filtro de Idade
-    if age_group == 'crianca':
-        df_filtered = df_filtered[df_filtered['Idade'] <= 12]
-        filter_labels.append('👶 Crianças')
-    elif age_group == 'adolescente':
-        df_filtered = df_filtered[(df_filtered['Idade'] >= 13) & (df_filtered['Idade'] <= 17)]
-        filter_labels.append('🧒 Adolescentes')
-    elif age_group == 'adulto':
-        df_filtered = df_filtered[(df_filtered['Idade'] >= 18) & (df_filtered['Idade'] <= 59)]
-        filter_labels.append('👨 Adultos')
-    elif age_group == 'idoso':
-        df_filtered = df_filtered[df_filtered['Idade'] >= 60]
-        filter_labels.append('👴 Idosos')
-    
-    # Estatísticas do filtro
-    total_original = len(df_global)
-    total_filtered = len(df_filtered)
-    percent_filtered = (total_filtered / total_original * 100) if total_original > 0 else 0
-    
-    if not filter_labels:
-        filter_labels = ['✨ Sem filtros aplicados']
-    
-    stats_div = html.Div([
-        html.Div([
-            html.Span('📊 Registros: ', style={'fontWeight': '600', 'color': COLORS['text']}),
-            html.Span(f'{total_filtered:,} / {total_original:,} ', style={'color': COLORS['accent'], 'fontSize': '1.1em', 'fontWeight': '700'}),
-            html.Span(f'({percent_filtered:.1f}%)', style={'color': COLORS['text_secondary']})
-        ], style={'marginBottom': '8px'}),
-        html.Div([
-            html.Span('🔍 Filtros ativos: ', style={'fontWeight': '600', 'color': COLORS['text']}),
-            html.Span(' | '.join(filter_labels), style={'color': COLORS['accent_secondary']})
-        ])
-    ])
-    
-    # Gráfico principal: Incidência
-    if view_type == 'diagnosticos':
-        # Contagem de diagnósticos
-        diag_counts = df_filtered['Diagnóstico'].value_counts().reset_index()
-        diag_counts.columns = ['Diagnóstico', 'Contagem']
-        
-        main_fig = go.Figure()
-        main_fig.add_trace(go.Bar(
-            x=diag_counts['Diagnóstico'],
-            y=diag_counts['Contagem'],
-            marker=dict(
-                color=diag_counts['Contagem'],
-                colorscale=[[0, COLORS['primary']], [0.5, COLORS['accent']], [1, COLORS['accent_secondary']]],
-                line=dict(color='white', width=2)
-            ),
-            text=diag_counts['Contagem'],
-            textposition='outside',
-            textfont=dict(size=12, color=COLORS['text'], weight='bold'),
-            hovertemplate='<b>%{x}</b><br>Casos: %{y}<extra></extra>'
-        ))
-        
-        main_fig.update_layout(
-            title=dict(
-                text='<b>Incidência de Diagnósticos no Perfil Selecionado</b>',
-                font=dict(size=16, color=COLORS['text'])
-            ),
-            height=450,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color=COLORS['text'], family='Inter, sans-serif'),
-            xaxis=dict(title='Diagnóstico', gridcolor=COLORS['border'], tickangle=-45),
-            yaxis=dict(title='Número de Casos', gridcolor=COLORS['border']),
-            showlegend=False,
-            margin=dict(t=60, b=100, l=60, r=30)
-        )
-        
-    else:  # sintomas
-        # Top 10 sintomas mais frequentes (excluindo HIV/AIDS)
-        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
-        symptom_sums = df_filtered[symptom_cols_filtered].sum().sort_values(ascending=False).head(10)
-        
-        main_fig = go.Figure()
-        main_fig.add_trace(go.Bar(
-            y=symptom_sums.index,
-            x=symptom_sums.values,
-            orientation='h',
-            marker=dict(
-                color=symptom_sums.values,
-                colorscale=[[0, COLORS['primary']], [0.5, COLORS['accent']], [1, COLORS['accent_secondary']]],
-                line=dict(color='white', width=2)
-            ),
-            text=symptom_sums.values.astype(int),
-            textposition='outside',
-            textfont=dict(size=11, color=COLORS['text'], weight='bold'),
-            hovertemplate='<b>%{y}</b><br>Ocorrências: %{x}<extra></extra>'
-        ))
-        
-        main_fig.update_layout(
-            title=dict(
-                text='<b>Top 10 Sintomas no Perfil Selecionado</b>',
-                font=dict(size=16, color=COLORS['text'])
-            ),
-            height=450,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color=COLORS['text'], family='Inter, sans-serif'),
-            xaxis=dict(title='Número de Ocorrências', gridcolor=COLORS['border']),
-            yaxis=dict(title='Sintoma', gridcolor=COLORS['border']),
-            showlegend=False,
-            margin=dict(t=60, b=60, l=200, r=30)
-        )
-    
-    # Gráfico de correlação (scatter matrix)
-    if view_type == 'diagnosticos':
-        # Correlação entre variáveis climáticas colorido por diagnóstico
-        sample_df = df_filtered.sample(min(500, len(df_filtered))) if len(df_filtered) > 500 else df_filtered
-        
-        corr_fig = go.Figure()
-        
-        for diag in sample_df['Diagnóstico'].unique()[:5]:  # Top 5 diagnósticos
-            df_diag = sample_df[sample_df['Diagnóstico'] == diag]
-            corr_fig.add_trace(go.Scatter(
-                x=df_diag['Temperatura (°C)'],
-                y=df_diag['Umidade'],
-                mode='markers',
-                name=diag,
-                marker=dict(size=8, opacity=0.6),
-                hovertemplate=f'<b>{diag}</b><br>Temp: %{{x:.1f}}°C<br>Umid: %{{y:.2f}}<extra></extra>'
-            ))
-        
-        corr_fig.update_layout(
-            title=dict(
-                text='<b>Temperatura vs Umidade por Diagnóstico</b>',
-                font=dict(size=14, color=COLORS['text'])
-            ),
-            height=450,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color=COLORS['text'], family='Inter, sans-serif'),
-            xaxis=dict(title='Temperatura (°C)', gridcolor=COLORS['border']),
-            yaxis=dict(title='Umidade', gridcolor=COLORS['border']),
-            legend=dict(
-                x=0.02, y=0.98,
-                bgcolor='rgba(30, 33, 57, 0.9)',
-                bordercolor=COLORS['border'],
-                borderwidth=1
-            ),
-            margin=dict(t=50, b=60, l=60, r=30)
-        )
-    else:
-        # Para sintomas, mostrar média de sintomas por faixas climáticas (excluindo HIV/AIDS)
-        symptom_cols_filtered = [col for col in symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
-        temp_bins = pd.cut(df_filtered['Temperatura (°C)'], bins=5)
-        avg_symptoms = df_filtered.groupby(temp_bins)[symptom_cols_filtered[:10]].mean().mean(axis=1)
-        
-        corr_fig = go.Figure()
-        corr_fig.add_trace(go.Scatter(
-            x=[str(b) for b in avg_symptoms.index],
-            y=avg_symptoms.values,
-            mode='lines+markers',
-            line=dict(color=COLORS['accent'], width=3),
-            marker=dict(size=10, color=COLORS['accent_secondary']),
-            fill='tozeroy',
-            fillcolor='rgba(240, 147, 251, 0.2)',
-            hovertemplate='Faixa: %{x}<br>Média de Sintomas: %{y:.2f}<extra></extra>'
-        ))
-        
-        corr_fig.update_layout(
-            title=dict(
-                text='<b>Média de Sintomas por Faixa de Temperatura</b>',
-                font=dict(size=14, color=COLORS['text'])
-            ),
-            height=450,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color=COLORS['text'], family='Inter, sans-serif'),
-            xaxis=dict(title='Faixa de Temperatura', gridcolor=COLORS['border'], tickangle=-45),
-            yaxis=dict(title='Média de Sintomas', gridcolor=COLORS['border']),
-            showlegend=False,
-            margin=dict(t=50, b=100, l=60, r=30)
-        )
-    
-    return stats_div, main_fig, corr_fig
-
-
+overview.register_callbacks(app)
+eda.register_callbacks(app)
 def create_ml_layout():
     """Layout dos modelos de ML"""
-    if classifier is None or not hasattr(classifier, 'model') or classifier.model is None:
+    if not is_classifier_available():
         return html.Div([
             html.Div([
                 html.H2('Modelos de Machine Learning', style={
@@ -2612,28 +672,38 @@ def create_ml_layout():
         ]),
         
         html.Div([
+            create_card([html.Div(id='classifier-model-summary')], 
+                       'Resumo do Modelo de Classificação')
+        ]),
+
+        html.Div([
             create_card([dcc.Graph(id='feature-importance-graph')], 
                        'Top 20 Features Mais Importantes (Random Forest)')
         ]),
         
         html.Div([
-            html.Div([
-                create_card([dcc.Graph(id='cluster-visualization-2d-graph')], 
-                           'Visualização de Clusters (PCA 2D)')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-            
-            html.Div([
-                create_card([dcc.Graph(id='cluster-pca-3d-graph')], 
-                           'Visualização de Clusters PCA 3D')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-        ]),
-        
+            create_card([dcc.Graph(id='cluster-pca-3d-graph')], 
+                       'Visualização de Clusters PCA 3D')
+        ], style={'width': '100%', 'padding': '10px'}),
+
         html.Div([
+            html.Label('Número de clusters (K):', style={'color': COLORS['text_secondary'], 'fontWeight': '500', 'marginRight': '10px'}),
             html.Div([
-                create_card([dcc.Graph(id='cluster-visualization-3d-graph')], 
-                           'Visualização de Clusters 3D (Variáveis Climáticas)')
-            ], style={'width': '100%', 'padding': '10px'}),
-        ]),
+                dcc.Slider(
+                    id='climate-k-slider',
+                    min=3,
+                    max=7,
+                    step=1,
+                    value=4,
+                    marks={k: str(k) for k in range(3, 8)},
+                    tooltip={"placement": "bottom", "always_visible": True},
+                    updatemode='drag',
+                    included=False
+                )
+            ], style={'width': '40%', 'marginBottom': '20px'}),
+            create_card([dcc.Graph(id='cluster-visualization-3d-graph')], 
+                       'Visualização de Clusters 3D (Variáveis Climáticas)')
+        ], style={'width': '100%', 'padding': '10px'}),
 
         html.Div([
             html.Div([
@@ -2660,15 +730,37 @@ def create_ml_layout():
 )
 def update_model_metrics(tab):
     """Atualiza exibição de métricas do modelo"""
-    load_data_and_models()
     if tab != 'tab-ml' or not is_classifier_available():
         return html.Div()
     
-    # Verificar se há métricas salvas
-    if hasattr(classifier, 'metrics') and classifier.metrics:
-        metrics = classifier.metrics
-        
+    ctx = get_context()
+    metrics = getattr(ctx.classifier, 'metrics', None)
+
+    if not metrics:
         return html.Div([
+            html.Div([
+                html.Div('ℹ️', style={'fontSize': '2em', 'marginBottom': '10px'}),
+                html.H3('Métricas indisponíveis', style={
+                    'color': COLORS['text'],
+                    'marginBottom': '10px',
+                    'fontSize': '1.2em',
+                    'fontWeight': '600'
+                }),
+                html.P(
+                    'Execute o treinamento e salve o modelo para visualizar as métricas registradas.',
+                    style={'color': COLORS['text_secondary'], 'fontSize': '1em'}
+                )
+            ], style={
+                'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
+                'padding': '30px',
+                'borderRadius': '15px',
+                'textAlign': 'center',
+                'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
+                'border': f'1px solid {COLORS["border"]}'
+            })
+        ])
+
+    return html.Div([
             # Cards de métricas principais
             html.Div([
                 html.Div([
@@ -2699,7 +791,7 @@ def update_model_metrics(tab):
                 
                 html.Div([
                     html.Div([
-                        html.Div('📊', style={'fontSize': '2em', 'marginBottom': '10px'}),
+                        html.Div('�', style={'fontSize': '2em', 'marginBottom': '10px'}),
                         html.H4('Precisão', style={
                             'color': COLORS['text_secondary'], 
                             'margin': '0', 
@@ -2776,29 +868,6 @@ def update_model_metrics(tab):
                 ], style={'width': '24%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'}),
             ], style={'marginBottom': '20px'})
         ])
-    else:
-        return html.Div([
-            html.Div([
-                html.Div('ℹ️', style={'fontSize': '2em', 'marginBottom': '10px'}),
-                html.H3('Métricas indisponíveis', style={
-                    'color': COLORS['text'],
-                    'marginBottom': '10px',
-                    'fontSize': '1.2em',
-                    'fontWeight': '600'
-                }),
-                html.P(
-                    'Execute o treinamento e salve o modelo para visualizar as métricas registradas.',
-                    style={'color': COLORS['text_secondary'], 'fontSize': '1em'}
-                )
-            ], style={
-                'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-                'padding': '30px',
-                'borderRadius': '15px',
-                'textAlign': 'center',
-                'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-                'border': f'1px solid {COLORS["border"]}'
-            })
-        ])
 
 
 @app.callback(
@@ -2807,13 +876,12 @@ def update_model_metrics(tab):
 )
 def update_metrics_bar_chart(tab):
     """Atualiza gráfico de barras comparando métricas"""
-    load_data_and_models()
     if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
     try:
         # Obter métricas pré-calculadas
-        metrics = getattr(classifier, 'metrics', None)
+        metrics = getattr(get_context().classifier, 'metrics', None)
         if not metrics:
             return metrics_unavailable_figure()
         
@@ -2916,13 +984,12 @@ def update_metrics_bar_chart(tab):
 )
 def update_metrics_radar_chart(tab):
     """Atualiza gráfico radar de métricas"""
-    load_data_and_models()
     if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
     try:
         # Obter métricas pré-calculadas
-        metrics = getattr(classifier, 'metrics', None)
+        metrics = getattr(get_context().classifier, 'metrics', None)
         if not metrics:
             return metrics_unavailable_figure()
         
@@ -3003,16 +1070,15 @@ def update_metrics_radar_chart(tab):
 )
 def update_accuracy_gauge(tab):
     """Atualiza indicador gauge de acurácia"""
-    load_data_and_models()
     if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
     try:
-        # Obter ou calcular acurácia
-        if hasattr(classifier, 'metrics') and classifier.metrics:
-            accuracy = classifier.metrics['accuracy'] * 100
-        else:
+        metrics = getattr(get_context().classifier, 'metrics', None)
+        if not metrics:
             return metrics_unavailable_figure()
+
+        accuracy = metrics['accuracy'] * 100
         
         # Criar gauge
         fig = go.Figure(go.Indicator(
@@ -3078,15 +1144,13 @@ def update_accuracy_gauge(tab):
 )
 def update_metrics_comparison_line(tab):
     """Atualiza gráfico de linha comparando métricas"""
-    load_data_and_models()
     if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
     try:
         # Obter ou calcular métricas
-        if hasattr(classifier, 'metrics') and classifier.metrics:
-            metrics = classifier.metrics
-        else:
+        metrics = getattr(get_context().classifier, 'metrics', None)
+        if not metrics:
             return metrics_unavailable_figure()
         
         # Simular evolução das métricas (você pode substituir por dados reais de treinamento)
@@ -3198,12 +1262,24 @@ def update_metrics_comparison_line(tab):
 )
 def update_feature_importance(tab):
     """Atualiza gráfico de importância de features"""
-    load_data_and_models()
-    if tab != 'tab-ml' or classifier is None or not hasattr(classifier, 'feature_importances') or classifier.feature_importances is None:
+    if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
     try:
-        top_20 = classifier.feature_importances.head(20)
+        clf = get_context().classifier
+        feature_importances = getattr(clf, 'feature_importances', None)
+        if feature_importances is None:
+            # Calcular em tempo de execução se possível
+            try:
+                top_20 = clf.get_feature_importance(top_n=20)
+            except Exception:
+                return go.Figure().add_annotation(
+                    text='Importância de features indisponível para o classificador atual.',
+                    xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=14, color=COLORS['text'])
+                )
+        else:
+            top_20 = feature_importances.head(20)
         
         fig = px.bar(x=top_20.values, y=top_20.index,
                      orientation='h',
@@ -3245,110 +1321,39 @@ def update_feature_importance(tab):
 
 
 @app.callback(
-    Output('cluster-visualization-2d-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_cluster_visualization_2d(tab):
-    """Atualiza visualização de clusters 2D"""
-    load_data_and_models()
-    if tab != 'tab-ml':
-        return go.Figure()
-    
-    try:
-        feature_frame, cluster_labels = get_cluster_features_and_labels()
-    except ValueError as exc:
-        return go.Figure().add_annotation(
-            text=f'Não foi possível gerar a visualização: {exc}',
-            xref='paper', yref='paper', x=0.5, y=0.5,
-            showarrow=False, font=dict(size=14, color=COLORS['text'])
-        )
-
-    X_scaled = clusterer.scaler.transform(feature_frame)
-
-    if X_scaled.shape[0] != len(cluster_labels):
-        min_len = min(X_scaled.shape[0], len(cluster_labels))
-        feature_frame = feature_frame.iloc[:min_len]
-        cluster_labels = cluster_labels.iloc[:min_len]
-        X_scaled = X_scaled[:min_len]
-    
-    # PCA para 2D
-    from sklearn.decomposition import PCA
-    pca = PCA(n_components=2, random_state=42)
-    X_pca = pca.fit_transform(X_scaled)
-    
-    # Criar DataFrame para plotar
-    plot_df = pd.DataFrame({
-        'PC1': X_pca[:, 0],
-        'PC2': X_pca[:, 1],
-        'Cluster': cluster_labels.astype(str).values
-    }, index=feature_frame.index)
-
-    hover_fields = []
-    if 'Diagnóstico' in df_global.columns:
-        diag_series = df_global.loc[plot_df.index, 'Diagnóstico'].astype(str)
-        plot_df['Diagnóstico'] = diag_series.values
-        hover_fields.append('Diagnóstico')
-    
-    fig = px.scatter(plot_df, x='PC1', y='PC2', color='Cluster',
-                    hover_data=hover_fields or None,
-                    title='',
-                    color_discrete_sequence=px.colors.qualitative.Set3)
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title=f'PC1 ({pca.explained_variance_ratio_[0]:.1%} var.)',
-        yaxis_title=f'PC2 ({pca.explained_variance_ratio_[1]:.1%} var.)',
-        height=600
-    )
-    
-    return fig
-
-
-@app.callback(
     Output('cluster-pca-3d-graph', 'figure'),
     Input('tabs', 'value')
 )
 def update_cluster_pca_3d(tab):
     """Atualiza visualização de clusters em 3D com PCA"""
-    load_data_and_models()
     if tab != 'tab-ml':
         return go.Figure()
     
     try:
-        feature_frame, cluster_labels = get_cluster_features_and_labels()
-    except ValueError as exc:
-        return go.Figure().add_annotation(
-            text=f'Não foi possível gerar a visualização: {exc}',
-            xref='paper', yref='paper', x=0.5, y=0.5,
-            showarrow=False, font=dict(size=14, color=COLORS['text'])
-        )
+        ctx, feature_frame, X_scaled = _prepare_cluster_dataset()
+    except RuntimeError as exc:
+        return _error_figure(str(exc))
 
-    X_scaled = clusterer.scaler.transform(feature_frame)
+    elbow_k = _get_elbow_k(X_scaled)
+    cluster_labels = _fit_kmeans_labels(X_scaled, elbow_k)
 
-    if X_scaled.shape[0] != len(cluster_labels):
-        min_len = min(X_scaled.shape[0], len(cluster_labels))
-        feature_frame = feature_frame.iloc[:min_len]
-        cluster_labels = cluster_labels.iloc[:min_len]
-        X_scaled = X_scaled[:min_len]
-    
     # PCA para 3D
-    from sklearn.decomposition import PCA
     pca = PCA(n_components=3, random_state=42)
     X_pca = pca.fit_transform(X_scaled)
     
     # Criar DataFrame para plotar
+    cluster_series = pd.Series(cluster_labels, index=feature_frame.index, dtype=int) + 1
     plot_df = pd.DataFrame({
         'PC1': X_pca[:, 0],
         'PC2': X_pca[:, 1],
         'PC3': X_pca[:, 2],
-        'Cluster': cluster_labels.astype(str).values
+        'Cluster': cluster_series.astype(str).values
     }, index=feature_frame.index)
 
     hover_fields = []
-    if 'Diagnóstico' in df_global.columns:
-        diag_series = df_global.loc[plot_df.index, 'Diagnóstico'].astype(str)
+    diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
+    if diagnosis_col in ctx.df.columns:
+        diag_series = ctx.df.loc[plot_df.index, diagnosis_col].astype(str)
         plot_df['Diagnóstico'] = diag_series.values
         hover_fields.append('Diagnóstico')
     
@@ -3395,70 +1400,49 @@ def update_cluster_pca_3d(tab):
 
 @app.callback(
     Output('cluster-visualization-3d-graph', 'figure'),
-    Input('tabs', 'value')
+    [Input('tabs', 'value'), Input('climate-k-slider', 'value')]
 )
-def update_cluster_visualization_3d(tab):
-    """Atualiza visualização de clusters em 3D com variáveis climáticas"""
-    load_data_and_models()
+def update_cluster_visualization_3d(tab, k):
+    """Atualiza visualização de clusters em 3D com variáveis climáticas e k ajustável"""
     if tab != 'tab-ml':
         return go.Figure()
 
-    if df_global is None:
-        return go.Figure().add_annotation(
-            text='Dados indisponíveis para gerar o gráfico 3D.',
-            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
+    ctx = get_context()
+    df = ctx.df
+    diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
 
     required_cols = [
         'Temperatura (°C)',
         'Umidade',
         'Velocidade do Vento (km/h)',
-        'Diagnóstico',
+        diagnosis_col,
         'Idade'
     ]
 
-    missing_cols = [col for col in required_cols if col not in df_global.columns]
+    missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         missing_str = ', '.join(missing_cols)
-        return go.Figure().add_annotation(
-            text=f'Colunas ausentes para o gráfico 3D: {missing_str}',
-            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
+        return _error_figure(f'Colunas ausentes para o gráfico 3D: {missing_str}')
 
-    try:
-        feature_frame, labels = get_cluster_features_and_labels()
-    except ValueError as exc:
-        return go.Figure().add_annotation(
-            text=f'Erro ao carregar clusters: {exc}',
-            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
-
-    plot_df = df_global.loc[feature_frame.index, required_cols].copy()
-    plot_df = plot_df.dropna()
+    # Usar apenas variáveis climáticas para clustering
+    climate_vars = ['Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
+    plot_df = df[required_cols].dropna().copy()
     if plot_df.empty:
-        return go.Figure().add_annotation(
-            text='Nenhum dado válido para exibir no gráfico 3D.',
-            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
+        return _error_figure('Nenhum dado válido para exibir no gráfico 3D.')
 
-    # Remover diagnósticos H8 e alinhar índices com rótulos
+    plot_df = plot_df.rename(columns={diagnosis_col: 'Diagnóstico'})
     mask = plot_df['Diagnóstico'].astype(str).str.upper() != 'H8'
     plot_df = plot_df[mask]
     if plot_df.empty:
-        return go.Figure().add_annotation(
-            text='Após remover H8, não há dados suficientes para o gráfico 3D.',
-            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
+        return _error_figure('Após remover H8, não há dados suficientes para o gráfico 3D.')
 
-    labels = labels.loc[plot_df.index].astype(str)
-    plot_df['Cluster'] = labels
-    plot_df['Diagnóstico'] = plot_df['Diagnóstico'].astype(str)
-    
+    # Clustering dinâmico com KMeans
+    scaler = StandardScaler()
+    X_climate = scaler.fit_transform(plot_df[climate_vars])
+    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+    clusters = kmeans.fit_predict(X_climate)
+    plot_df['Cluster'] = clusters.astype(str)
+
     fig = px.scatter_3d(
         plot_df, 
         x='Temperatura (°C)', 
@@ -3466,7 +1450,7 @@ def update_cluster_visualization_3d(tab):
         z='Velocidade do Vento (km/h)',
         color='Cluster',
         hover_data=['Diagnóstico', 'Idade'],
-        title='',
+        title=f'Clusters Climáticos (K={k})',
         color_discrete_sequence=px.colors.qualitative.Set3,
         labels={
             'Temperatura (°C)': 'Temperatura (°C)',
@@ -3474,7 +1458,7 @@ def update_cluster_visualization_3d(tab):
             'Velocidade do Vento (km/h)': 'Vento (km/h)'
         }
     )
-    
+
     fig.update_layout(
         plot_bgcolor=COLORS['background'],
         paper_bgcolor=COLORS['card'],
@@ -3487,7 +1471,7 @@ def update_cluster_visualization_3d(tab):
             bgcolor=COLORS['background']
         )
     )
-    
+
     return fig
 
 
@@ -3497,79 +1481,61 @@ def update_cluster_visualization_3d(tab):
 )
 def update_cluster_diagnosis_stacked(tab):
     """Proporção de diagnósticos por cluster (barras empilhadas)"""
-    load_data_and_models()
     if tab != 'tab-ml':
         return go.Figure()
 
-    if df_global is None:
-        return go.Figure().add_annotation(
-            text='Dados indisponíveis para gerar a proporção por diagnóstico.',
-            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
-
     try:
-        if 'Diagnóstico' not in df_global.columns:
-            return go.Figure().add_annotation(
-                text='Coluna "Diagnóstico" não encontrada no dataset', xref='paper', yref='paper',
-                x=0.5, y=0.5, showarrow=False, font=dict(size=14, color=COLORS['text'])
-            )
+        ctx, feature_frame, X_scaled = _prepare_cluster_dataset()
+    except RuntimeError as exc:
+        return _error_figure(str(exc))
 
-        _, labels = get_cluster_features_and_labels()
-        diag = df_global.loc[labels.index, 'Diagnóstico'].astype(str)
+    diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
+    if diagnosis_col not in ctx.df.columns:
+        return _error_figure('Coluna "Diagnóstico" não encontrada no dataset.')
 
-        # Remover diagnósticos inválidos e alinhar rótulos
-        valid_mask = diag.str.upper() != 'H8'
-        diag = diag[valid_mask]
-        labels = labels.loc[diag.index].astype(str)
+    cluster_labels = _fit_kmeans_labels(X_scaled, n_clusters=6)
+    cluster_series = pd.Series(cluster_labels, index=feature_frame.index, dtype=int) + 1
+    diag_series = ctx.df.loc[cluster_series.index, diagnosis_col].astype(str)
 
-        if diag.empty:
-            return go.Figure().add_annotation(
-                text='Nenhum diagnóstico válido para compor o gráfico.',
-                xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-                font=dict(size=14, color=COLORS['text'])
-            )
+    valid_mask = diag_series.str.upper() != 'H8'
+    diag_series = diag_series[valid_mask]
+    cluster_series = cluster_series.loc[diag_series.index]
 
-        tmp = pd.DataFrame({'Cluster': labels, 'Diagnóstico': diag})
+    if diag_series.empty:
+        return _error_figure('Nenhum diagnóstico válido para compor o gráfico.')
 
-        # Proporção por diagnóstico dentro de cada cluster
-        counts = tmp.groupby(['Cluster', 'Diagnóstico']).size().reset_index(name='count')
-        total_per_cluster = counts.groupby('Cluster')['count'].transform('sum')
-        counts['Proporção'] = counts['count'] / total_per_cluster
+    tmp = pd.DataFrame({
+        'Cluster': cluster_series.apply(lambda c: f'Cluster {c}'),
+        'Diagnóstico': diag_series
+    })
 
-        # Ordenação dos clusters por código
-        counts['Cluster_ord'] = pd.to_numeric(counts['Cluster'], errors='coerce')
-        counts = counts.sort_values(['Cluster_ord', 'Diagnóstico'])
-        cluster_order = sorted(counts['Cluster'].unique(), key=lambda x: pd.to_numeric(x, errors='coerce'))
+    counts = tmp.groupby(['Cluster', 'Diagnóstico']).size().reset_index(name='count')
+    counts['Proporção'] = counts['count'] / counts.groupby('Cluster')['count'].transform('sum')
+    cluster_order = sorted(counts['Cluster'].unique(), key=lambda name: int(name.split()[-1]))
 
-        fig = px.bar(
-            counts,
-            x='Proporção',
-            y='Cluster',
-            color='Diagnóstico',
-            orientation='h',
-            barmode='stack',
-            color_discrete_sequence=px.colors.qualitative.Set3,
-            title=''
-        )
+    fig = px.bar(
+        counts,
+        x='Proporção',
+        y='Cluster',
+        color='Diagnóstico',
+        orientation='h',
+        barmode='stack',
+        color_discrete_sequence=px.colors.qualitative.Set3,
+        title='Clusters fixos (K=6): Diagnósticos por Cluster'
+    )
 
-        fig.update_layout(
-            plot_bgcolor=COLORS['background'],
-            paper_bgcolor=COLORS['card'],
-            font_color=COLORS['text'],
-            xaxis=dict(title='Proporção', tickformat='.0%', gridcolor=COLORS['border']),
-            yaxis=dict(title='Cluster', categoryorder='array', categoryarray=cluster_order),
-            height=500,
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-            margin=dict(t=40, b=60, l=80, r=40)
-        )
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis=dict(title='Proporção', tickformat='.0%', gridcolor=COLORS['border']),
+        yaxis=dict(title='Cluster', categoryorder='array', categoryarray=cluster_order),
+        height=500,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        margin=dict(t=40, b=60, l=80, r=40)
+    )
 
-        return fig
-    except Exception as e:
-        return go.Figure().add_annotation(
-            text=f'Erro ao gerar gráfico: {e}', xref='paper', yref='paper',
-            x=0.5, y=0.5, showarrow=False, font=dict(size=14, color=COLORS['text'])
-        )
+    return fig
 
 
 @app.callback(
@@ -3578,93 +1544,73 @@ def update_cluster_diagnosis_stacked(tab):
 )
 def update_cluster_symptoms_stacked(tab):
     """Proporção dos principais sintomas por cluster (barras empilhadas)"""
-    load_data_and_models()
     if tab != 'tab-ml':
         return go.Figure()
 
-    if df_global is None:
-        return go.Figure().add_annotation(
-            text='Dados indisponíveis para gerar a proporção de sintomas.',
-            xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color=COLORS['text'])
-        )
-
     try:
-        # Filtrar sintomas (remover HIV/AIDS) e selecionar top-N
-        sympts = [c for c in symptom_cols if 'HIV' not in c.upper() and 'AIDS' not in c.upper()]
-        if not sympts:
-            return go.Figure().add_annotation(
-                text='Nenhuma coluna de sintoma disponível', xref='paper', yref='paper',
-                x=0.5, y=0.5, showarrow=False, font=dict(size=14, color=COLORS['text'])
-            )
+        ctx, feature_frame, X_scaled = _prepare_cluster_dataset()
+    except RuntimeError as exc:
+        return _error_figure(str(exc))
 
-        top_n = 8
-        missing_symptoms = [col for col in sympts if col not in df_global.columns]
-        if missing_symptoms:
-            missing_str = ', '.join(missing_symptoms)
-            return go.Figure().add_annotation(
-                text=f'Colunas de sintomas ausentes: {missing_str}',
-                xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-                font=dict(size=14, color=COLORS['text'])
-            )
+    df = ctx.df
+    symptom_cols = ctx.symptom_cols or []
+    sympts = [c for c in symptom_cols if 'HIV' not in c.upper() and 'AIDS' not in c.upper()]
+    if not sympts:
+        return _error_figure('Nenhuma coluna de sintoma disponível.')
 
-        _, labels = get_cluster_features_and_labels()
-        df_tmp = df_global.loc[labels.index, sympts].copy()
-        df_tmp = df_tmp.dropna(how='all')
-        if df_tmp.empty:
-            return go.Figure().add_annotation(
-                text='Nenhum dado válido de sintomas para exibir.',
-                xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-                font=dict(size=14, color=COLORS['text'])
-            )
+    missing_symptoms = [col for col in sympts if col not in df.columns]
+    if missing_symptoms:
+        return _error_figure(f'Colunas de sintomas ausentes: {", ".join(missing_symptoms)}')
 
-        labels = labels.loc[df_tmp.index]
-        symptom_totals = df_tmp.sum().sort_values(ascending=False)
-        top_symptoms = symptom_totals.head(top_n).index.tolist()
-        if not top_symptoms:
-            return go.Figure().add_annotation(
-                text='Nenhum sintoma disponível após filtragem.',
-                xref='paper', yref='paper', x=0.5, y=0.5, showarrow=False,
-                font=dict(size=14, color=COLORS['text'])
-            )
+    elbow_k = _get_elbow_k(X_scaled)
+    cluster_labels = _fit_kmeans_labels(X_scaled, n_clusters=elbow_k)
+    cluster_series = pd.Series(cluster_labels, index=feature_frame.index, dtype=int) + 1
 
-        df_tmp = df_tmp[top_symptoms].copy()
-        df_tmp['Cluster'] = labels.astype(str)
+    df_tmp = df.loc[cluster_series.index, sympts].copy()
+    df_tmp = df_tmp.dropna(how='all')
+    if df_tmp.empty:
+        return _error_figure('Nenhum dado válido de sintomas para exibir.')
 
-        means = df_tmp.groupby('Cluster')[top_symptoms].mean().reset_index()
-        long_df = means.melt(id_vars='Cluster', var_name='Sintoma', value_name='Proporção')
+    df_tmp = df_tmp.apply(pd.to_numeric, errors='coerce').fillna(0)
+    symptom_totals = df_tmp.sum().sort_values(ascending=False)
+    top_symptoms = symptom_totals.head(8).index.tolist()
+    if not top_symptoms:
+        return _error_figure('Nenhum sintoma disponível após filtragem.')
 
-        # Nomes amigáveis
-        long_df['Sintoma'] = long_df['Sintoma'].apply(lambda s: s.replace('_', ' ').title())
+    df_tmp = df_tmp[top_symptoms]
+    df_tmp['Cluster'] = cluster_series.loc[df_tmp.index].apply(lambda c: f'Cluster {c}')
 
-        fig = px.bar(
-            long_df,
-            x='Proporção',
-            y='Cluster',
-            color='Sintoma',
-            orientation='h',
-            barmode='stack',
-            color_discrete_sequence=px.colors.qualitative.Set3,
-            title=''
-        )
+    means = df_tmp.groupby('Cluster')[top_symptoms].mean().reset_index()
+    long_df = means.melt(id_vars='Cluster', var_name='Sintoma', value_name='Proporção')
+    long_df['Sintoma'] = long_df['Sintoma'].apply(lambda s: s.replace('_', ' ').title())
 
-        fig.update_layout(
-            plot_bgcolor=COLORS['background'],
-            paper_bgcolor=COLORS['card'],
-            font_color=COLORS['text'],
-            xaxis=dict(title='Proporção', tickformat='.0%', gridcolor=COLORS['border']),
-            yaxis=dict(title='Cluster', categoryorder='array', categoryarray=sorted(long_df['Cluster'].unique(), key=lambda x: int(x))),
-            height=500,
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-            margin=dict(t=40, b=60, l=80, r=40)
-        )
+    fig = px.bar(
+        long_df,
+        x='Proporção',
+        y='Cluster',
+        color='Sintoma',
+        orientation='h',
+        barmode='stack',
+        color_discrete_sequence=px.colors.qualitative.Set3,
+        title=f'Clusters (k={elbow_k}) x Sintomas predominantes'
+    )
 
-        return fig
-    except Exception as e:
-        return go.Figure().add_annotation(
-            text=f'Erro ao gerar gráfico: {e}', xref='paper', yref='paper',
-            x=0.5, y=0.5, showarrow=False, font=dict(size=14, color=COLORS['text'])
-        )
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font_color=COLORS['text'],
+        xaxis=dict(title='Proporção', tickformat='.0%', gridcolor=COLORS['border']),
+        yaxis=dict(
+            title='Cluster',
+            categoryorder='array',
+            categoryarray=sorted(long_df['Cluster'].unique(), key=lambda name: int(name.split()[-1]))
+        ),
+        height=500,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        margin=dict(t=40, b=60, l=80, r=40)
+    )
+
+    return fig
 
 @app.callback(
     Output('classification-performance-graph', 'figure'),
@@ -3672,10 +1618,10 @@ def update_cluster_symptoms_stacked(tab):
 )
 def update_classification_performance(tab):
     """Atualiza gráfico de performance da classificação"""
-    load_data_and_models()
     if tab != 'tab-ml' or not is_classifier_available():
         return go.Figure()
     
+    classifier = get_context().classifier
     cv_scores = getattr(classifier, 'cv_scores', None)
     metrics_data = getattr(classifier, 'metrics', None)
 
@@ -3731,6 +1677,160 @@ def update_classification_performance(tab):
     )
     
     return fig
+
+
+@app.callback(
+    Output('classifier-model-summary', 'children'),
+    Input('tabs', 'value')
+)
+def update_classifier_model_summary(tab):
+    """Exibe um resumo textual do classificador para torná-lo mais compreensível."""
+    if tab != 'tab-ml' or not is_classifier_available():
+        return html.Div()
+
+    ctx = get_context()
+    clf = ctx.classifier
+    model = getattr(clf, 'model', None)
+    if model is None:
+        return html.Div('Classificador não carregado.', style={'color': COLORS['text_secondary']})
+
+    params = {}
+    try:
+        params = model.get_params()
+    except Exception:
+        pass
+
+    classes = []
+    try:
+        classes = list(clf.label_encoder.classes_)
+    except Exception:
+        pass
+
+    fnames = getattr(clf, 'feature_names', None)
+    feature_count = len(fnames) if isinstance(fnames, list) else 'N/D'
+
+    items = [
+        html.Li(f"Modelo: {model.__class__.__name__}"),
+        html.Li(f"Total de features: {feature_count}"),
+        html.Li(f"Total de classes: {len(classes) if classes else 'N/D'}"),
+        html.Li(f"Classes: {', '.join(classes[:10]) + (' …' if classes and len(classes) > 10 else '')}"),
+    ]
+
+    # Mostrar hiperparâmetros principais de RF, se aplicável
+    if model.__class__.__name__ == 'RandomForestClassifier' and params:
+        hp = [
+            html.Li(f"n_estimators: {params.get('n_estimators')}") ,
+            html.Li(f"max_depth: {params.get('max_depth')}") ,
+            html.Li(f"min_samples_split: {params.get('min_samples_split')}") ,
+            html.Li(f"min_samples_leaf: {params.get('min_samples_leaf')}") ,
+            html.Li(f"bootstrap: {params.get('bootstrap')}") ,
+        ]
+    else:
+        hp = [html.Li('Hiperparâmetros principais indisponíveis para este modelo.')]
+
+    return html.Div([
+        html.P('Resumo do classificador treinado e seus principais hiperparâmetros para facilitar a interpretação.', 
+               style={'color': COLORS['text_secondary'], 'marginBottom': '10px'}),
+        html.Ul(items, style={'marginBottom': '8px'}),
+        html.P('Hiperparâmetros:', style={'color': COLORS['text_secondary'], 'marginTop': '10px'}),
+        html.Ul(hp)
+    ], style={'color': COLORS['text']})
+
+
+@app.callback(
+    Output('climate-cluster-explainability', 'children'),
+    [Input('tabs', 'value'), Input('climate-k-slider', 'value')]
+)
+def update_climate_cluster_explainability(tab, k):
+    """Gera uma explicação textual relacionando clusters climáticos a diagnósticos e sintomas."""
+    if tab != 'tab-ml':
+        return html.Div()
+
+    ctx = get_context()
+    df = ctx.df
+    diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
+
+    required_cols = [
+        'Temperatura (°C)',
+        'Umidade',
+        'Velocidade do Vento (km/h)',
+        diagnosis_col,
+        'Idade'
+    ]
+
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        return html.Div(f"Colunas ausentes: {', '.join(missing_cols)}", style={'color': COLORS['text_secondary']})
+
+    # Preparar dados e clusters com KMeans baseado em variáveis climáticas
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.cluster import KMeans
+    climate_vars = ['Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
+    plot_df = df[required_cols].dropna().copy()
+    plot_df = plot_df.rename(columns={diagnosis_col: 'Diagnóstico'})
+    mask = plot_df['Diagnóstico'].astype(str).str.upper() != 'H8'
+    plot_df = plot_df[mask]
+    if plot_df.empty:
+        return html.Div('Sem dados válidos para explicabilidade.', style={'color': COLORS['text_secondary']})
+
+    scaler = StandardScaler()
+    X_climate = scaler.fit_transform(plot_df[climate_vars])
+    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+    clusters = kmeans.fit_predict(X_climate)
+    plot_df['Cluster'] = clusters.astype(str)
+
+    # Diagnósticos mais comuns por cluster
+    diag_counts = plot_df.groupby(['Cluster', 'Diagnóstico']).size().reset_index(name='count')
+    diag_props = diag_counts.copy()
+    diag_props['total'] = diag_props.groupby('Cluster')['count'].transform('sum')
+    diag_props['prop'] = diag_props['count'] / diag_props['total']
+    top_diags = (diag_props.sort_values(['Cluster', 'prop'], ascending=[True, False])
+                          .groupby('Cluster').head(2))
+
+    # Sintomas: usar colunas conhecidas, remover ausentes/HIV
+    symptom_cols = [c for c in (ctx.symptom_cols or []) if 'HIV' not in c.upper() and 'AIDS' not in c.upper()]
+    symptom_cols = [c for c in symptom_cols if c in df.columns]
+    summary_blocks = []
+
+    if symptom_cols:
+        sympt = df.loc[plot_df.index, symptom_cols].copy()
+        sympt = sympt.apply(pd.to_numeric, errors='coerce').fillna(0)
+        overall_means = sympt.mean()
+        sympt['Cluster'] = plot_df['Cluster']
+        means_by_cluster = sympt.groupby('Cluster')[symptom_cols].mean()
+
+        for clus in sorted(plot_df['Cluster'].unique(), key=lambda x: int(x)):
+            clus_means = means_by_cluster.loc[clus]
+            lift = (clus_means - overall_means).sort_values(ascending=False)
+            top_sy = [s.replace('_', ' ').title() for s in lift.head(3).index]
+            # Top diagnósticos
+            td = top_diags[top_diags['Cluster'] == clus]
+            td_list = [f"{row['Diagnóstico']} ({row['prop']*100:.1f}%)" for _, row in td.iterrows()]
+            # Clima médio
+            cent = plot_df[plot_df['Cluster'] == clus][climate_vars].mean()
+            summary_blocks.append(html.Li([
+                html.B(f"Cluster {clus}: "),
+                html.Span(f"Diagnósticos mais comuns: {', '.join(td_list)}; "),
+                html.Span(f"Sintomas característicos: {', '.join(top_sy)}; "),
+                html.Span(f"Clima médio → Temp {cent['Temperatura (°C)']:.1f}°C, Umid {cent['Umidade']:.0f}%, Vento {cent['Velocidade do Vento (km/h)']:.0f} km/h")
+            ]))
+    else:
+        # Sem sintomas disponíveis: apenas diagnóstico/clima
+        for clus in sorted(plot_df['Cluster'].unique(), key=lambda x: int(x)):
+            td = top_diags[top_diags['Cluster'] == clus]
+            td_list = [f"{row['Diagnóstico']} ({row['prop']*100:.1f}%)" for _, row in td.iterrows()]
+            cent = plot_df[plot_df['Cluster'] == clus][climate_vars].mean()
+            summary_blocks.append(html.Li([
+                html.B(f"Cluster {clus}: "),
+                html.Span(f"Diagnósticos mais comuns: {', '.join(td_list)}; "),
+                html.Span(f"Clima médio → Temp {cent['Temperatura (°C)']:.1f}°C, Umid {cent['Umidade']:.0f}%, Vento {cent['Velocidade do Vento (km/h)']:.0f} km/h")
+            ]))
+
+    return html.Div([
+        html.P('Resumo automático relacionando os clusters formados por variáveis climáticas aos diagnósticos e sintomas mais característicos.',
+               style={'color': COLORS['text_secondary']}),
+        html.Ul(summary_blocks, style={'paddingLeft': '18px', 'color': COLORS['text']})
+    ])
 
 
 def create_pipeline_layout():

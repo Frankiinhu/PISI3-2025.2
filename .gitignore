@@ -49,6 +49,3 @@ data/*.xlsx
 
 # Models
 models/
-
-# Results
-results/
