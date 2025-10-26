@@ -4580,6 +4580,14 @@ def create_pipeline_layout():
                 ])
             ], 'Console')
         ], style={'marginTop': '20px'}),
+        
+        # Elementos placeholder para evitar warnings de callbacks de outras abas
+        html.Div([
+            dcc.Graph(id='classification-performance-graph'),
+            dcc.Graph(id='climate-diagnosis-distribution'),
+            dcc.Slider(id='climate-k-slider', min=4, max=6, value=5),
+            html.Div(id='climate-k-info'),
+        ], style={'display': 'none'}),
     ])
 
 
