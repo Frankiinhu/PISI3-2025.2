@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from ..components import create_card
-from ..core.data_context import get_context, get_cluster_feature_frame, has_feature_importances, is_classifier_available
+from ..core.data_context import get_context, has_feature_importances, is_classifier_available
 from ..core.theme import COLORS, page_header
 
 
@@ -54,7 +54,7 @@ def _filter_dropdown(component_id: str, label: str, options: Iterable[dict], val
         html.Label(label, style={'color': COLORS['text'], 'fontWeight': '600', 'display': 'block', 'marginBottom': '8px'}),
         dcc.Dropdown(
             id=component_id,
-            options=list(options),
+            options=list(options),  # type: ignore[arg-type]
             value=value,
             clearable=False,
             className='custom-dropdown',
@@ -65,7 +65,6 @@ def _filter_dropdown(component_id: str, label: str, options: Iterable[dict], val
 
 def create_layout() -> html.Div:
     ctx = get_context()
-    diagnosis_label = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
     clean_symptoms = [s for s in ctx.symptom_cols if 'HIV' not in s.upper() and 'AIDS' not in s.upper()]
     symptom_options = [{'label': s, 'value': s} for s in clean_symptoms][:20]
     default_symptoms = [opt['value'] for opt in symptom_options][:4]
@@ -165,7 +164,7 @@ def create_layout() -> html.Div:
             html.Label('Selecione Sintomas para Análise:', style={'color': COLORS['text'], 'fontWeight': '600', 'marginBottom': '12px', 'display': 'block'}),
             dcc.Dropdown(
                 id='symptom-selector',
-                options=symptom_options,
+                options=symptom_options,  # type: ignore[arg-type]
                 value=default_symptoms,
                 multi=True,
                 placeholder='Selecione sintomas...',
@@ -182,10 +181,6 @@ def create_layout() -> html.Div:
         }),
         _graph_row([
             _graph_card('symptom-frequency-graphs', 'Frequência de Sintomas por Diagnóstico', flex='1 1 600px'),
-        ]),
-        _graph_row([
-            _graph_card('diagnosis-by-symptom-graph', 'Diagnósticos por Sintoma (Top 10)'),
-            _graph_card('symptom-importance-graph', 'Importância dos Sintomas (Modelo)'),
         ]),
         _section_header('🌤️ Explorador Climático Interativo', 'Filtre condições e observe impactos em sintomas e diagnósticos.'),
         html.Div([
@@ -476,48 +471,6 @@ def register_callbacks(app) -> None:
             margin=dict(l=150, r=80, t=60, b=140),
         )
         fig.update_xaxes(tickangle=-45)
-        return fig
-
-    @app.callback(Output('diagnosis-by-symptom-graph', 'figure'), Input('tabs', 'value'))
-    def update_diagnosis_by_symptom(tab):
-        if tab != 'tab-eda':
-            return go.Figure()
-
-        ctx = get_context()
-        filtered_symptoms = [col for col in ctx.symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
-        if not filtered_symptoms:
-            return go.Figure()
-
-        top_symptoms = ctx.df[filtered_symptoms].sum().sort_values(ascending=False).head(10).index.tolist()
-        fig = make_subplots(rows=5, cols=2, subplot_titles=top_symptoms, vertical_spacing=0.08, horizontal_spacing=0.12)
-        palette = [
-            '#5559ff', '#7b7fff', '#a4a8ff', '#4facfe', '#00c9a7',
-            '#fbbf24', '#f87171', '#4ade80', '#60a5fa', '#a78bfa',
-        ]
-        for idx, symptom in enumerate(top_symptoms):
-            subset = ctx.df[ctx.df[symptom] == 1]
-            counts = subset[diagnosis_col()].value_counts()
-            row, col = divmod(idx, 2)
-            fig.add_trace(
-                go.Bar(
-                    x=counts.index,
-                    y=counts.values,
-                    marker=dict(color=palette[idx % len(palette)], line=dict(color=COLORS['border'], width=1)),
-                    showlegend=False,
-                ),
-                row=row + 1,
-                col=col + 1,
-            )
-            fig.update_xaxes(tickangle=-45, row=row + 1, col=col + 1, gridcolor=COLORS['border'])
-            fig.update_yaxes(row=row + 1, col=col + 1, gridcolor=COLORS['border'])
-
-        fig.update_layout(
-            height=1400,
-            plot_bgcolor=COLORS['background'],
-            paper_bgcolor=COLORS['card'],
-            font=dict(family='Inter, sans-serif', color=COLORS['text']),
-            margin=dict(t=80, b=60, l=60, r=40),
-        )
         return fig
 
     @app.callback(Output('symptom-importance-graph', 'figure'), Input('tabs', 'value'))

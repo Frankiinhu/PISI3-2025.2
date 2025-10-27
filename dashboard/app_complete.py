@@ -100,6 +100,46 @@ def _get_elbow_k(X_scaled: np.ndarray) -> int:
     _CACHED_ELBOW_K = scanned_ks[idx]
     return _CACHED_ELBOW_K
 
+
+def _prepare_climate_clusters(k: int) -> tuple[pd.DataFrame, list[str]]:
+    """Prepara dados de clusterização climática aplicando KMeans com K fornecido."""
+    ctx = get_context()
+    df = ctx.df
+    diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
+
+    required_cols = [
+        'Temperatura (°C)',
+        'Umidade',
+        'Velocidade do Vento (km/h)',
+        diagnosis_col,
+        'Idade'
+    ]
+
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        cols = ', '.join(missing_cols)
+        raise RuntimeError(f'Colunas ausentes para o agrupamento climático: {cols}')
+
+    climate_vars = ['Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
+    plot_df = df[required_cols].dropna().copy()
+    if plot_df.empty:
+        raise RuntimeError('Nenhum dado válido para gerar os clusters climáticos.')
+
+    plot_df = plot_df.rename(columns={diagnosis_col: 'Diagnóstico'})
+    mask = plot_df['Diagnóstico'].astype(str).str.upper() != 'H8'
+    plot_df = plot_df[mask]
+    if plot_df.empty:
+        raise RuntimeError('Após remover H8, não há dados suficientes para os clusters climáticos.')
+
+    scaler = StandardScaler()
+    X_climate = scaler.fit_transform(plot_df[climate_vars])
+    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+    clusters = kmeans.fit_predict(X_climate)
+    cluster_series = pd.Series(clusters, index=plot_df.index, dtype=int) + 1
+    plot_df['Cluster'] = cluster_series.astype(str)
+
+    return plot_df, climate_vars
+
 from dashboard.core.theme import COLORS, INDEX_STRING, metrics_unavailable_figure
 from dashboard.views import eda, overview
 
@@ -683,122 +723,41 @@ def create_ml_layout():
         
         html.Div([
             create_card([dcc.Graph(id='cluster-pca-3d-graph')], 
-                       'Visualização de Clusters PCA 3D')
+                       'Clusters PCA 3D (Diagnóstico & Sintomas)')
         ], style={'width': '100%', 'padding': '10px'}),
 
         html.Div([
-            html.Label('Número de clusters (K):', style={'color': COLORS['text_secondary'], 'fontWeight': '500', 'marginRight': '10px'}),
-            html.Div([
-                dcc.Slider(
-                    id='climate-k-slider',
-                    min=3,
-                    max=7,
-                    step=1,
-                    value=4,
-                    marks={k: str(k) for k in range(3, 8)},
-                    tooltip={"placement": "bottom", "always_visible": True},
-                    updatemode='drag',
-                    included=False
-                )
-            ], style={'width': '40%', 'marginBottom': '20px'}),
-            create_card([dcc.Graph(id='cluster-visualization-3d-graph')], 
-                       'Visualização de Clusters 3D (Variáveis Climáticas)')
+            html.Label('Número de clusters climáticos (K):', style={
+                'color': COLORS['text_secondary'],
+                'fontWeight': '500',
+                'display': 'block',
+                'marginBottom': '10px'
+            }),
+            dcc.Slider(
+                id='climate-cluster-k-slider',
+                min=4,
+                max=7,
+                step=1,
+                value=4,
+                marks={k: str(k) for k in range(4, 8)},
+                tooltip={"placement": "bottom", "always_visible": True}
+            ),
+            create_card([dcc.Graph(id='climate-cluster-3d-graph')], 
+                       'Clusters Climáticos 3D (Temperatura, Umidade, Vento)')
         ], style={'width': '100%', 'padding': '10px'}),
 
         html.Div([
             html.Div([
                 create_card([dcc.Graph(id='cluster-diagnosis-stacked')], 
-                           'Distribuição de Diagnósticos por Cluster (barras empilhadas)')
+                           'Diagnósticos por Cluster (PCA)')
             ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
 
             html.Div([
-                create_card([dcc.Graph(id='cluster-symptoms-stacked')], 
-                           'Principais Sintomas por Cluster (barras empilhadas)')
+                create_card([dcc.Graph(id='climate-cluster-diagnosis-stacked')], 
+                           'Diagnósticos por Cluster (Clima)')
             ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
         ]),
-        
-        # ==================== CLUSTERIZAÇÃO POR PERFIS CLIMÁTICOS ====================
-        html.Div([
-            html.H3('🌤️ Clusterização por Perfis Climáticos', style={
-                'color': COLORS['text'], 
-                'marginTop': '50px',
-                'marginBottom': '10px',
-                'fontSize': '1.8em',
-                'fontWeight': '700',
-                'borderLeft': f'6px solid {COLORS["warning"]}',
-                'paddingLeft': '15px',
-                'background': f'linear-gradient(90deg, rgba(251, 191, 36, 0.1) 0%, transparent 100%)'
-            }),
-            html.P('Agrupamento baseado em condições climáticas (temperatura, umidade e vento)', style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '25px',
-                'paddingLeft': '21px'
-            })
-        ]),
-        
-        # Controle de K (número de clusters)
-        html.Div([
-            create_card([
-                html.Label('🔢 Número de Clusters (K):', style={
-                    'color': COLORS['text'],
-                    'fontWeight': '600',
-                    'display': 'block',
-                    'marginBottom': '12px',
-                    'fontSize': '1.1em'
-                }),
-                dcc.Slider(
-                    id='climate-k-slider',
-                    min=4,
-                    max=6,
-                    step=1,
-                    value=5,
-                    marks={i: {'label': str(i), 'style': {'color': COLORS['text'], 'fontSize': '1.1em', 'fontWeight': '600'}} for i in range(4, 7)},
-                    tooltip={"placement": "bottom", "always_visible": True}
-                ),
-                html.Div(id='climate-k-info', style={
-                    'marginTop': '20px',
-                    'padding': '15px',
-                    'backgroundColor': COLORS['background'],
-                    'borderRadius': '8px',
-                    'color': COLORS['text_secondary'],
-                    'borderLeft': f'4px solid {COLORS["accent"]}'
-                })
-            ])
-        ], style={'marginBottom': '30px'}),
-        
-        # Visualizações dos perfis climáticos
-        html.Div([
-            create_card([dcc.Graph(id='climate-clusters-3d')], 
-                       'Clusters Climáticos em 3D (Temperatura, Umidade, Vento)')
-        ]),
-        
-        html.Div([
-            html.Div([
-                create_card([dcc.Graph(id='climate-clusters-2d')], 
-                           'Projeção 2D dos Perfis Climáticos (PCA)')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-            
-            html.Div([
-                create_card([dcc.Graph(id='climate-profiles-radar')], 
-                           'Características dos Perfis Climáticos')
-            ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='climate-profiles-table')], 
-                       'Descrição dos Perfis Climáticos')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='climate-diagnosis-distribution')], 
-                       'Distribuição de Diagnósticos por Perfil Climático')
-        ]),
-        
-        html.Div([
-            create_card([dcc.Graph(id='classification-performance-graph')], 
-                       'Performance da Classificação por Classe')
-        ]),
+
     ])
 
 
@@ -1477,54 +1436,23 @@ def update_cluster_pca_3d(tab):
 
 
 @app.callback(
-    Output('cluster-visualization-3d-graph', 'figure'),
-    [Input('tabs', 'value'), Input('climate-k-slider', 'value')]
+    Output('climate-cluster-3d-graph', 'figure'),
+    [Input('tabs', 'value'), Input('climate-cluster-k-slider', 'value')]
 )
-def update_cluster_visualization_3d(tab, k):
-    """Atualiza visualização de clusters em 3D com variáveis climáticas e k ajustável"""
+def update_climate_cluster_3d(tab, k):
+    """Atualiza visualização 3D dos clusters climáticos com controle de K."""
     if tab != 'tab-ml':
         return go.Figure()
 
-    ctx = get_context()
-    df = ctx.df
-    diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
-
-    required_cols = [
-        'Temperatura (°C)',
-        'Umidade',
-        'Velocidade do Vento (km/h)',
-        diagnosis_col,
-        'Idade'
-    ]
-
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        missing_str = ', '.join(missing_cols)
-        return _error_figure(f'Colunas ausentes para o gráfico 3D: {missing_str}')
-
-    # Usar apenas variáveis climáticas para clustering
-    climate_vars = ['Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
-    plot_df = df[required_cols].dropna().copy()
-    if plot_df.empty:
-        return _error_figure('Nenhum dado válido para exibir no gráfico 3D.')
-
-    plot_df = plot_df.rename(columns={diagnosis_col: 'Diagnóstico'})
-    mask = plot_df['Diagnóstico'].astype(str).str.upper() != 'H8'
-    plot_df = plot_df[mask]
-    if plot_df.empty:
-        return _error_figure('Após remover H8, não há dados suficientes para o gráfico 3D.')
-
-    # Clustering dinâmico com KMeans
-    scaler = StandardScaler()
-    X_climate = scaler.fit_transform(plot_df[climate_vars])
-    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-    clusters = kmeans.fit_predict(X_climate)
-    plot_df['Cluster'] = clusters.astype(str)
+    try:
+        plot_df, _ = _prepare_climate_clusters(int(k))
+    except RuntimeError as exc:
+        return _error_figure(str(exc))
 
     fig = px.scatter_3d(
-        plot_df, 
-        x='Temperatura (°C)', 
-        y='Umidade', 
+        plot_df,
+        x='Temperatura (°C)',
+        y='Umidade',
         z='Velocidade do Vento (km/h)',
         color='Cluster',
         hover_data=['Diagnóstico', 'Idade'],
@@ -1571,7 +1499,8 @@ def update_cluster_diagnosis_stacked(tab):
     if diagnosis_col not in ctx.df.columns:
         return _error_figure('Coluna "Diagnóstico" não encontrada no dataset.')
 
-    cluster_labels = _fit_kmeans_labels(X_scaled, n_clusters=6)
+    elbow_k = _get_elbow_k(X_scaled)
+    cluster_labels = _fit_kmeans_labels(X_scaled, n_clusters=elbow_k)
     cluster_series = pd.Series(cluster_labels, index=feature_frame.index, dtype=int) + 1
     diag_series = ctx.df.loc[cluster_series.index, diagnosis_col].astype(str)
 
@@ -1599,7 +1528,7 @@ def update_cluster_diagnosis_stacked(tab):
         orientation='h',
         barmode='stack',
         color_discrete_sequence=px.colors.qualitative.Set3,
-        title='Clusters fixos (K=6): Diagnósticos por Cluster'
+        title=f'Clusters PCA (K={elbow_k}): Diagnósticos por Cluster'
     )
 
     fig.update_layout(
@@ -1617,60 +1546,35 @@ def update_cluster_diagnosis_stacked(tab):
 
 
 @app.callback(
-    Output('cluster-symptoms-stacked', 'figure'),
-    Input('tabs', 'value')
+    Output('climate-cluster-diagnosis-stacked', 'figure'),
+    [Input('tabs', 'value'), Input('climate-cluster-k-slider', 'value')]
 )
-def update_cluster_symptoms_stacked(tab):
-    """Proporção dos principais sintomas por cluster (barras empilhadas)"""
+def update_climate_cluster_diagnosis_stacked(tab, k):
+    """Compara diagnósticos por cluster para a abordagem climática."""
     if tab != 'tab-ml':
         return go.Figure()
 
     try:
-        ctx, feature_frame, X_scaled = _prepare_cluster_dataset()
+        plot_df, _ = _prepare_climate_clusters(int(k))
     except RuntimeError as exc:
         return _error_figure(str(exc))
 
-    df = ctx.df
-    symptom_cols = ctx.symptom_cols or []
-    sympts = [c for c in symptom_cols if 'HIV' not in c.upper() and 'AIDS' not in c.upper()]
-    if not sympts:
-        return _error_figure('Nenhuma coluna de sintoma disponível.')
+    tmp = plot_df.copy()
+    tmp['Cluster'] = tmp['Cluster'].apply(lambda c: f'Cluster {c}')
 
-    missing_symptoms = [col for col in sympts if col not in df.columns]
-    if missing_symptoms:
-        return _error_figure(f'Colunas de sintomas ausentes: {", ".join(missing_symptoms)}')
-
-    elbow_k = _get_elbow_k(X_scaled)
-    cluster_labels = _fit_kmeans_labels(X_scaled, n_clusters=elbow_k)
-    cluster_series = pd.Series(cluster_labels, index=feature_frame.index, dtype=int) + 1
-
-    df_tmp = df.loc[cluster_series.index, sympts].copy()
-    df_tmp = df_tmp.dropna(how='all')
-    if df_tmp.empty:
-        return _error_figure('Nenhum dado válido de sintomas para exibir.')
-
-    df_tmp = df_tmp.apply(pd.to_numeric, errors='coerce').fillna(0)
-    symptom_totals = df_tmp.sum().sort_values(ascending=False)
-    top_symptoms = symptom_totals.head(8).index.tolist()
-    if not top_symptoms:
-        return _error_figure('Nenhum sintoma disponível após filtragem.')
-
-    df_tmp = df_tmp[top_symptoms]
-    df_tmp['Cluster'] = cluster_series.loc[df_tmp.index].apply(lambda c: f'Cluster {c}')
-
-    means = df_tmp.groupby('Cluster')[top_symptoms].mean().reset_index()
-    long_df = means.melt(id_vars='Cluster', var_name='Sintoma', value_name='Proporção')
-    long_df['Sintoma'] = long_df['Sintoma'].apply(lambda s: s.replace('_', ' ').title())
+    counts = tmp.groupby(['Cluster', 'Diagnóstico']).size().reset_index(name='count')
+    counts['Proporção'] = counts['count'] / counts.groupby('Cluster')['count'].transform('sum')
+    cluster_order = sorted(counts['Cluster'].unique(), key=lambda name: int(name.split()[-1]))
 
     fig = px.bar(
-        long_df,
+        counts,
         x='Proporção',
         y='Cluster',
-        color='Sintoma',
+        color='Diagnóstico',
         orientation='h',
         barmode='stack',
         color_discrete_sequence=px.colors.qualitative.Set3,
-        title=f'Clusters (k={elbow_k}) x Sintomas predominantes'
+        title=f'Clusters Climáticos (K={int(k)}): Diagnósticos por Cluster'
     )
 
     fig.update_layout(
@@ -1678,84 +1582,13 @@ def update_cluster_symptoms_stacked(tab):
         paper_bgcolor=COLORS['card'],
         font_color=COLORS['text'],
         xaxis=dict(title='Proporção', tickformat='.0%', gridcolor=COLORS['border']),
-        yaxis=dict(
-            title='Cluster',
-            categoryorder='array',
-            categoryarray=sorted(long_df['Cluster'].unique(), key=lambda name: int(name.split()[-1]))
-        ),
+        yaxis=dict(title='Cluster', categoryorder='array', categoryarray=cluster_order),
         height=500,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(t=40, b=60, l=80, r=40)
     )
 
     return fig
-
-@app.callback(
-    Output('classification-performance-graph', 'figure'),
-    Input('tabs', 'value')
-)
-def update_classification_performance(tab):
-    """Atualiza gráfico de performance da classificação"""
-    if tab != 'tab-ml' or not is_classifier_available():
-        return go.Figure()
-    
-    classifier = get_context().classifier
-    cv_scores = getattr(classifier, 'cv_scores', None)
-    metrics_data = getattr(classifier, 'metrics', None)
-
-    # Se houver métricas de validação disponíveis, usar
-    # Caso contrário, usar dados agregados das métricas salvas
-    if cv_scores:
-        # Mostrar scores de cross-validation
-        metrics_df = pd.DataFrame({
-            'Fold': [f'Fold {i+1}' for i in range(len(cv_scores))],
-            'Accuracy': cv_scores
-        })
-        
-        fig = px.bar(metrics_df, x='Fold', y='Accuracy',
-                    title='',
-                    color='Accuracy',
-                    color_continuous_scale='Blues')
-        
-        fig.add_hline(y=np.mean(cv_scores), 
-                     line_dash="dash", 
-                     line_color="red",
-                     annotation_text=f"Média: {np.mean(cv_scores):.3f}")
-    elif metrics_data:
-        metric_names = ['Acurácia', 'Precisão', 'Recall', 'F1-Score']
-        metric_values = [
-            metrics_data.get('accuracy', 0),
-            metrics_data.get('precision', 0),
-            metrics_data.get('recall', 0),
-            metrics_data.get('f1_score', 0)
-        ]
-
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=metric_names,
-            y=metric_values,
-            marker=dict(color=[COLORS['success'], COLORS['primary'], COLORS['accent'], COLORS['warning']]),
-            text=[f'{val*100:.2f}%' for val in metric_values],
-            textposition='auto',
-            hovertemplate='<b>%{x}</b><br>Valor: %{y:.2%}<extra></extra>'
-        ))
-        fig.update_yaxes(range=[0, 1], tickformat='.0%')
-    else:
-        return metrics_unavailable_figure()
-    
-    fig.update_layout(
-        plot_bgcolor=COLORS['background'],
-        paper_bgcolor=COLORS['card'],
-        font_color=COLORS['text'],
-        xaxis_title='Diagnóstico',
-        yaxis_title='Acurácia (cross-validation)' if cv_scores else 'Porcentagem',
-        xaxis_tickangle=-45,
-        barmode='group',
-        height=500
-    )
-    
-    return fig
-
 
 @app.callback(
     Output('classifier-model-summary', 'children'),
@@ -1813,102 +1646,6 @@ def update_classifier_model_summary(tab):
         html.P('Hiperparâmetros:', style={'color': COLORS['text_secondary'], 'marginTop': '10px'}),
         html.Ul(hp)
     ], style={'color': COLORS['text']})
-
-
-@app.callback(
-    Output('climate-cluster-explainability', 'children'),
-    [Input('tabs', 'value'), Input('climate-k-slider', 'value')]
-)
-def update_climate_cluster_explainability(tab, k):
-    """Gera uma explicação textual relacionando clusters climáticos a diagnósticos e sintomas."""
-    if tab != 'tab-ml':
-        return html.Div()
-
-    ctx = get_context()
-    df = ctx.df
-    diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
-
-    required_cols = [
-        'Temperatura (°C)',
-        'Umidade',
-        'Velocidade do Vento (km/h)',
-        diagnosis_col,
-        'Idade'
-    ]
-
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        return html.Div(f"Colunas ausentes: {', '.join(missing_cols)}", style={'color': COLORS['text_secondary']})
-
-    # Preparar dados e clusters com KMeans baseado em variáveis climáticas
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.cluster import KMeans
-    climate_vars = ['Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
-    plot_df = df[required_cols].dropna().copy()
-    plot_df = plot_df.rename(columns={diagnosis_col: 'Diagnóstico'})
-    mask = plot_df['Diagnóstico'].astype(str).str.upper() != 'H8'
-    plot_df = plot_df[mask]
-    if plot_df.empty:
-        return html.Div('Sem dados válidos para explicabilidade.', style={'color': COLORS['text_secondary']})
-
-    scaler = StandardScaler()
-    X_climate = scaler.fit_transform(plot_df[climate_vars])
-    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-    clusters = kmeans.fit_predict(X_climate)
-    plot_df['Cluster'] = clusters.astype(str)
-
-    # Diagnósticos mais comuns por cluster
-    diag_counts = plot_df.groupby(['Cluster', 'Diagnóstico']).size().reset_index(name='count')
-    diag_props = diag_counts.copy()
-    diag_props['total'] = diag_props.groupby('Cluster')['count'].transform('sum')
-    diag_props['prop'] = diag_props['count'] / diag_props['total']
-    top_diags = (diag_props.sort_values(['Cluster', 'prop'], ascending=[True, False])
-                          .groupby('Cluster').head(2))
-
-    # Sintomas: usar colunas conhecidas, remover ausentes/HIV
-    symptom_cols = [c for c in (ctx.symptom_cols or []) if 'HIV' not in c.upper() and 'AIDS' not in c.upper()]
-    symptom_cols = [c for c in symptom_cols if c in df.columns]
-    summary_blocks = []
-
-    if symptom_cols:
-        sympt = df.loc[plot_df.index, symptom_cols].copy()
-        sympt = sympt.apply(pd.to_numeric, errors='coerce').fillna(0)
-        overall_means = sympt.mean()
-        sympt['Cluster'] = plot_df['Cluster']
-        means_by_cluster = sympt.groupby('Cluster')[symptom_cols].mean()
-
-        for clus in sorted(plot_df['Cluster'].unique(), key=lambda x: int(x)):
-            clus_means = means_by_cluster.loc[clus]
-            lift = (clus_means - overall_means).sort_values(ascending=False)
-            top_sy = [s.replace('_', ' ').title() for s in lift.head(3).index]
-            # Top diagnósticos
-            td = top_diags[top_diags['Cluster'] == clus]
-            td_list = [f"{row['Diagnóstico']} ({row['prop']*100:.1f}%)" for _, row in td.iterrows()]
-            # Clima médio
-            cent = plot_df[plot_df['Cluster'] == clus][climate_vars].mean()
-            summary_blocks.append(html.Li([
-                html.B(f"Cluster {clus}: "),
-                html.Span(f"Diagnósticos mais comuns: {', '.join(td_list)}; "),
-                html.Span(f"Sintomas característicos: {', '.join(top_sy)}; "),
-                html.Span(f"Clima médio → Temp {cent['Temperatura (°C)']:.1f}°C, Umid {cent['Umidade']:.0f}%, Vento {cent['Velocidade do Vento (km/h)']:.0f} km/h")
-            ]))
-    else:
-        # Sem sintomas disponíveis: apenas diagnóstico/clima
-        for clus in sorted(plot_df['Cluster'].unique(), key=lambda x: int(x)):
-            td = top_diags[top_diags['Cluster'] == clus]
-            td_list = [f"{row['Diagnóstico']} ({row['prop']*100:.1f}%)" for _, row in td.iterrows()]
-            cent = plot_df[plot_df['Cluster'] == clus][climate_vars].mean()
-            summary_blocks.append(html.Li([
-                html.B(f"Cluster {clus}: "),
-                html.Span(f"Diagnósticos mais comuns: {', '.join(td_list)}; "),
-                html.Span(f"Clima médio → Temp {cent['Temperatura (°C)']:.1f}°C, Umid {cent['Umidade']:.0f}%, Vento {cent['Velocidade do Vento (km/h)']:.0f} km/h")
-            ]))
-
-    return html.Div([
-        html.P('Resumo automático relacionando os clusters formados por variáveis climáticas aos diagnósticos e sintomas mais característicos.',
-               style={'color': COLORS['text_secondary']}),
-        html.Ul(summary_blocks, style={'paddingLeft': '18px', 'color': COLORS['text']})
-    ])
 
 
 def create_pipeline_layout():
