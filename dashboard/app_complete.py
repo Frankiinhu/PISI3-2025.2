@@ -30,6 +30,7 @@ from dashboard.core.data_context import (
 # Cluster utilities ------------------------------------------------------
 
 _CACHED_ELBOW_K: int | None = None
+_CACHED_CLUSTER_PREP: tuple[int, tuple[int, ...], Any] | None = None
 
 
 def _error_figure(message: str) -> go.Figure:
@@ -53,12 +54,22 @@ def _prepare_cluster_dataset() -> tuple[Any, pd.DataFrame, np.ndarray]:
         feature_frame = get_cluster_feature_frame()
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
+    # Cache prepared dataset to avoid repeated scaler.transform / dataframe selection
+    global _CACHED_CLUSTER_PREP
+    # Use simple cache key: id(ctx) and dataframe shape + column names
+    df_key = (feature_frame.shape, tuple(feature_frame.columns))
+    ctx_id = id(ctx)
+    if _CACHED_CLUSTER_PREP is not None:
+        cached_ctx_id, cached_df_key, cached_result = _CACHED_CLUSTER_PREP
+        if cached_ctx_id == ctx_id and cached_df_key == df_key:
+            return cached_result
 
     scaler = getattr(ctx.clusterer, 'scaler', None)
     if scaler is None:
         raise RuntimeError('Clusterizador sem scaler configurado; execute o treinamento do modelo.')
 
     X_scaled = scaler.transform(feature_frame)
+    _CACHED_CLUSTER_PREP = (ctx_id, df_key, (ctx, feature_frame, X_scaled))
     return ctx, feature_frame, X_scaled
 
 
@@ -146,341 +157,8 @@ from dashboard.views import eda, overview
 
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "NimbusVita - Análise de Doenças Climáticas"
+# Usar o INDEX_STRING centralizado definido em dashboard.core.theme para evitar duplicação
 app.index_string = INDEX_STRING
-
-# CSS customizado para melhorar a aparência
-app.index_string = '''
-<!DOCTYPE html>
-<html>
-    <head>
-        {%metas%}
-        <title>{%title%}</title>
-        {%favicon%}
-        {%css%}
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-        <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            
-            body {
-                font-family: 'Inter', 'Segoe UI', sans-serif;
-                -webkit-font-smoothing: antialiased;
-                -moz-osx-font-smoothing: grayscale;
-            }
-            
-            /* Animações suaves */
-            .stat-card:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 12px 48px rgba(0,0,0,0.6) !important;
-            }
-            
-            .card-hover:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 12px 48px rgba(102, 126, 234, 0.3) !important;
-            }
-            
-            /* Estilo para inputs */
-            input[type="number"] {
-                background-color: rgba(255,255,255,0.05) !important;
-                border: 1px solid #2d3250 !important;
-                color: #e8eaf6 !important;
-                transition: all 0.3s ease;
-            }
-            
-            input[type="number"]:focus {
-                border-color: #5559ff !important;
-                box-shadow: 0 0 0 3px rgba(85, 89, 255, 0.1) !important;
-                outline: none;
-            }
-            
-            /* Estilo para checkboxes */
-            input[type="checkbox"] {
-                accent-color: #5559ff;
-            }
-            
-            /* Animação do botão */
-            button:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 15px 40px rgba(85, 89, 255, 0.6) !important;
-            }
-            
-            button:active {
-                transform: translateY(0);
-            }
-            
-            /* Scrollbar customizada */
-            ::-webkit-scrollbar {
-                width: 10px;
-            }
-            
-            ::-webkit-scrollbar-track {
-                background: #0a0e27;
-            }
-            
-            ::-webkit-scrollbar-thumb {
-                background: linear-gradient(135deg, #5559ff 0%, #7b7fff 100%);
-                border-radius: 5px;
-            }
-            
-            ::-webkit-scrollbar-thumb:hover {
-                background: linear-gradient(135deg, #7b7fff 0%, #a4a8ff 100%);
-            }
-            
-            /* Dropdown styles */
-            .Select-control {
-                background-color: rgba(255,255,255,0.05) !important;
-                border-color: #2d3250 !important;
-            }
-            
-            .Select-menu-outer {
-                background-color: #1e2139 !important;
-                border: 1px solid #2d3250 !important;
-            }
-            
-            .Select-option {
-                background-color: #1e2139 !important;
-                color: #e8eaf6 !important;
-            }
-            
-            .Select-option:hover {
-                background-color: #252a48 !important;
-            }
-            
-            /* Custom dropdown styles */
-            .custom-dropdown .Select-value-label,
-            .custom-dropdown .Select-placeholder,
-            .custom-dropdown input {
-                color: #e8eaf6 !important;
-            }
-            
-            .custom-dropdown .Select-value {
-                background-color: rgba(102, 126, 234, 0.2) !important;
-                border-color: rgba(102, 126, 234, 0.4) !important;
-                color: #e8eaf6 !important;
-            }
-            
-            .custom-dropdown .Select-input input {
-                color: #e8eaf6 !important;
-            }
-            
-            /* Estilo para o dropdown do Dash/React-Select */
-            div[class*="css-"] input {
-                color: #e8eaf6 !important;
-            }
-            
-            div[class*="singleValue"] {
-                color: #e8eaf6 !important;
-            }
-            
-            div[class*="placeholder"] {
-                color: rgba(232, 234, 246, 0.6) !important;
-            }
-            
-            /* Tabs animation */
-            ._dash-undo-redo {
-                display: none;
-            }
-            
-            .tab {
-                transition: all 0.3s ease;
-            }
-            
-            /* Animações de carregamento */
-            @keyframes fadeInUp {
-                from {
-                    opacity: 0;
-                    transform: translateY(30px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateY(0);
-                }
-            }
-            
-            @keyframes pulse {
-                0%, 100% {
-                    opacity: 1;
-                }
-                50% {
-                    opacity: 0.5;
-                }
-            }
-            
-            @keyframes shimmer {
-                0% {
-                    background-position: -1000px 0;
-                }
-                100% {
-                    background-position: 1000px 0;
-                }
-            }
-            
-            /* Aplicar animação aos gráficos */
-            .js-plotly-plot {
-                animation: fadeInUp 0.8s ease-out;
-            }
-            
-            /* Loading spinner personalizado */
-            ._dash-loading {
-                position: relative;
-            }
-            
-            ._dash-loading::after {
-                content: "";
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                width: 50px;
-                height: 50px;
-                margin: -25px 0 0 -25px;
-                border: 4px solid rgba(85, 89, 255, 0.3);
-                border-top-color: #5559ff;
-                border-radius: 50%;
-                animation: spin 1s linear infinite;
-            }
-            
-            @keyframes spin {
-                to {
-                    transform: rotate(360deg);
-                }
-            }
-            
-            /* Animação suave para cards */
-            [id*="card-"] {
-                animation: fadeInUp 0.6s ease-out;
-                animation-fill-mode: both;
-            }
-            
-            /* Delay progressivo para múltiplos cards */
-            [id*="card-"]:nth-child(1) { animation-delay: 0.1s; }
-            [id*="card-"]:nth-child(2) { animation-delay: 0.2s; }
-            [id*="card-"]:nth-child(3) { animation-delay: 0.3s; }
-            [id*="card-"]:nth-child(4) { animation-delay: 0.4s; }
-            
-            /* Hover effect aprimorado com escala */
-            [id*="card-"]:hover {
-                transform: translateY(-5px) scale(1.02);
-                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            }
-            
-            /* Skeleton loader para gráficos */
-            @keyframes skeletonLoading {
-                0% {
-                    background-position: -200px 0;
-                }
-                100% {
-                    background-position: calc(200px + 100%) 0;
-                }
-            }
-            
-            .skeleton-loader {
-                background: linear-gradient(
-                    90deg,
-                    rgba(85, 89, 255, 0.1) 0%,
-                    rgba(85, 89, 255, 0.3) 50%,
-                    rgba(85, 89, 255, 0.1) 100%
-                );
-                background-size: 200px 100%;
-                animation: skeletonLoading 1.5s infinite;
-                border-radius: 8px;
-            }
-            
-            /* Transições suaves para estado de carregamento */
-            .loading-state {
-                opacity: 0.6;
-                transition: opacity 0.3s ease;
-                pointer-events: none;
-            }
-            
-            /* Feedback visual de sucesso */
-            @keyframes successPulse {
-                0%, 100% {
-                    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
-                }
-                50% {
-                    box-shadow: 0 0 0 20px rgba(74, 222, 128, 0);
-                }
-            }
-            
-            .success-feedback {
-                animation: successPulse 1s ease-out;
-            }
-            
-            /* Bouncing animation para elementos interativos */
-            @keyframes bounce {
-                0%, 100% {
-                    transform: translateY(0);
-                }
-                50% {
-                    transform: translateY(-10px);
-                }
-            }
-            
-            .bounce-animation {
-                animation: bounce 2s infinite;
-            }
-            
-            /* Slide in animation */
-            @keyframes slideInLeft {
-                from {
-                    opacity: 0;
-                    transform: translateX(-50px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateX(0);
-                }
-            }
-            
-            @keyframes slideInRight {
-                from {
-                    opacity: 0;
-                    transform: translateX(50px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateX(0);
-                }
-            }
-            
-            .slide-in-left {
-                animation: slideInLeft 0.6s ease-out;
-            }
-            
-            .slide-in-right {
-                animation: slideInRight 0.6s ease-out;
-            }
-            
-            /* Progress bar animation */
-            @keyframes progressBar {
-                0% {
-                    width: 0%;
-                }
-                100% {
-                    width: 100%;
-                }
-            }
-            
-            .progress-bar {
-                height: 4px;
-                background: linear-gradient(90deg, #5559ff, #7b7fff, #a4a8ff);
-                animation: progressBar 2s ease-out;
-            }
-        </style>
-    </head>
-    <body>
-        {%app_entry%}
-        <footer>
-            {%config%}
-            {%scripts%}
-            {%renderer%}
-        </footer>
-    </body>
-</html>
-'''
 
 # Layout principal
 app.layout = html.Div(style={
@@ -828,7 +506,7 @@ def update_model_metrics(tab):
                 
                 html.Div([
                     html.Div([
-                        html.Div('�', style={'fontSize': '2em', 'marginBottom': '10px'}),
+                        html.Div('📐', style={'fontSize': '2em', 'marginBottom': '10px'}),
                         html.H4('Precisão', style={
                             'color': COLORS['text_secondary'], 
                             'margin': '0', 
@@ -967,7 +645,7 @@ def update_metrics_bar_chart(tab):
             margin=dict(t=30, b=80, l=60, r=40),
             showlegend=False,
             transition=dict(
-                duration=1000,
+                duration=300,
                 easing='cubic-in-out'
             )
         )
@@ -982,25 +660,9 @@ def update_metrics_bar_chart(tab):
         # Configurar animação inicial (barras crescem de 0 até o valor)
         fig.update_yaxes(range=[0, 105])
         
-        # Adicionar frames para animação
-        frames = []
-        steps = 20
-        for i in range(steps + 1):
-            frame_data = go.Bar(
-                x=metric_names,
-                y=[val * (i / steps) for val in metric_values],
-                text=[f'{val * (i / steps):.2f}%' for val in metric_values],
-                textposition='outside',
-                textfont=dict(size=14, color=COLORS['text'], weight='bold'),
-                marker=dict(
-                    color=colors_list,
-                    line=dict(color=COLORS['border'], width=2)
-                ),
-                hovertemplate='<b>%{x}</b><br>Valor: %{y:.2f}%<extra></extra>'
-            )
-            frames.append(go.Frame(data=[frame_data], name=str(i)))
-        
-        fig.frames = frames
+        # Evitar criação de frames pesados (muitos frames -> uso intenso de CPU/mem).
+        # Mantemos uma transição simples e rápida.
+        fig.update_layout(transition=dict(duration=300, easing='cubic-in-out'))
         
         return fig
     except Exception as e:
@@ -1073,8 +735,8 @@ def update_metrics_radar_chart(tab):
             margin=dict(t=40, b=40, l=60, r=60),
             showlegend=False,
             transition=dict(
-                duration=1200,
-                easing='elastic-out'
+                duration=300,
+                easing='cubic-in-out'
             )
         )
         
@@ -1151,8 +813,8 @@ def update_accuracy_gauge(tab):
             font=dict(family="Inter, sans-serif", color=COLORS['text']),
             margin=dict(t=80, b=40, l=40, r=40),
             transition=dict(
-                duration=1500,
-                easing='elastic-in-out'
+                duration=300,
+                easing='cubic-in-out'
             )
         )
         
@@ -1269,7 +931,7 @@ def update_metrics_comparison_line(tab):
             margin=dict(t=80, b=60, l=80, r=40),
             hovermode='x unified',
             transition=dict(
-                duration=800,
+                duration=300,
                 easing='cubic-in-out'
             )
         )
@@ -2176,4 +1838,5 @@ if __name__ == '__main__':
     print("🌐 Acesse: http://127.0.0.1:8050/")
     print("📊 Sistema de Predição de Doenças Relacionadas ao Clima")
     print("="*70 + "\n")
-    app.run(debug=True, port=8050)
+    # Desligar debug para execução mais rápida em não-desenvolvimento
+    app.run(debug=False, port=8050)
