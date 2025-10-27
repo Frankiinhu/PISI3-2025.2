@@ -12,15 +12,12 @@ def create_card(children, title: str | None = None) -> html.Div:
     if title:
         content.append(html.H3(title, style={
             'color': COLORS['text'],
-            'marginBottom': '20px',
-            'fontSize': '1.3em',
-            'fontWeight': '600',
-            'borderBottom': f'2px solid {COLORS["accent"]}',
-            'paddingBottom': '10px',
-            'background': f'linear-gradient(90deg, {COLORS["accent"]} 0%, transparent 100%)',
-            'WebkitBackgroundClip': 'text',
-            'WebkitTextFillColor': 'transparent',
-            'backgroundClip': 'text',
+            'marginBottom': '14px',
+            'fontSize': '1.25em',
+            'fontWeight': '700',
+            'paddingBottom': '8px',
+            'borderBottom': f'1px solid {COLORS["border"]}',
+            # usar cor sólida para garantir legibilidade em temas escuros
         }))
 
     content.extend(children if isinstance(children, list) else [children])
