@@ -1647,7 +1647,6 @@ def update_classifier_model_summary(tab):
         html.Ul(hp)
     ], style={'color': COLORS['text']})
 
-
 def create_pipeline_layout():
     """Layout da Pipeline Automatizada de Treinamento"""
     return html.Div([
