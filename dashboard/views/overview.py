@@ -1,10 +1,13 @@
 """Overview tab layout and callbacks."""
 from __future__ import annotations
 
+from typing import Iterable
+
 from dash import Input, Output, dcc, html
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import pandas as pd
 
 from ..components import create_card
 from ..core.data_context import get_context
@@ -41,6 +44,21 @@ _SECTION_SUBTITLE_STYLE = {
     'marginBottom': '25px',
     'fontSize': '1em',
 }
+
+
+def _filter_dropdown(component_id: str, label: str, options: Iterable[dict], value, width: str = '25%') -> html.Div:
+    """Helper function to create filter dropdown UI"""
+    return html.Div([
+        html.Label(label, style={'color': COLORS['text'], 'fontWeight': '600', 'display': 'block', 'marginBottom': '8px'}),
+        dcc.Dropdown(
+            id=component_id,
+            options=list(options),
+            value=value,
+            clearable=False,
+            className='custom-dropdown',
+            style={'backgroundColor': COLORS['secondary']},
+        ),
+    ], style={'flex': f'1 1 {width}', 'minWidth': '220px'})
 
 
 def _stat_card(icon: str, label: str, value: str, value_color: str) -> html.Div:
@@ -84,6 +102,30 @@ def create_layout() -> html.Div:
         '',
     )
 
+    # Controles de filtro para estratificação por gênero
+    gender_filter_options = [
+        {'label': '👨 Masculino', 'value': 1},
+        {'label': '👩 Feminino', 'value': 0},
+        {'label': '✨ Todos', 'value': 'todos'},
+    ]
+
+    age_filter_options = [
+        {'label': '👶 Crianças (0-12)', 'value': 'crianca'},
+        {'label': '🧒 Adolescentes (13-17)', 'value': 'adolescente'},
+        {'label': '👨 Adultos (18-59)', 'value': 'adulto'},
+        {'label': '👴 Idosos (60+)', 'value': 'idoso'},
+        {'label': '✨ Todos', 'value': 'todos'},
+    ]
+
+    filters_section = html.Div([
+        html.H3('🎯 Filtros de Estratificação', style=_SECTION_TITLE_STYLE),
+        html.P('Customize a visualização por gênero e faixa etária', style=_SECTION_SUBTITLE_STYLE),
+        html.Div([
+            _filter_dropdown('overview-gender-filter', '👤 Gênero', gender_filter_options, 'todos', width='40%'),
+            _filter_dropdown('overview-age-filter', '🎂 Faixa Etária', age_filter_options, 'todos', width='40%'),
+        ], style={'display': 'flex', 'gap': '20px', 'flexWrap': 'wrap', 'marginBottom': '20px', 'padding': '20px', 'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)', 'borderRadius': '14px', 'border': f'1px solid {COLORS["border"]}'}),
+    ])
+
     univariate_header = html.Div([
         html.H3('Análise Univariada', style=_SECTION_TITLE_STYLE),
         html.P('Distribuições individuais das principais variáveis monitoradas.', style=_SECTION_SUBTITLE_STYLE),
@@ -98,22 +140,46 @@ def create_layout() -> html.Div:
     return html.Div([
         overview_header,
         stats_cards,
-        univariate_header,
+        filters_section,
         create_card([dcc.Graph(id='diagnosis-count-graph')], 'Distribuição de Diagnósticos'),
+        univariate_header,
         univariate_top,
         create_card([dcc.Graph(id='climate-vars-distribution')], 'Distribuição de Variáveis Climáticas'),
     ])
 
 
 def register_callbacks(app) -> None:
-    @app.callback(Output('diagnosis-count-graph', 'figure'), Input('tabs', 'value'))
-    def update_diagnosis_count(tab):
+    @app.callback(
+        Output('diagnosis-count-graph', 'figure'),
+        [
+            Input('tabs', 'value'),
+            Input('overview-gender-filter', 'value'),
+            Input('overview-age-filter', 'value'),
+        ]
+    )
+    def update_diagnosis_count(tab, gender, age_group):
         if tab != 'tab-overview':
             return go.Figure()
 
         ctx = get_context()
         diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
-        diag_counts = ctx.df[diagnosis_col].value_counts().reset_index()
+        
+        # Aplicar filtros
+        df_filtered = ctx.df.copy()
+        
+        if gender != 'todos':
+            df_filtered = df_filtered[df_filtered['Gênero'] == gender]
+        
+        if age_group == 'crianca':
+            df_filtered = df_filtered[df_filtered['Idade'] <= 12]
+        elif age_group == 'adolescente':
+            df_filtered = df_filtered[df_filtered['Idade'].between(13, 17)]
+        elif age_group == 'adulto':
+            df_filtered = df_filtered[df_filtered['Idade'].between(18, 59)]
+        elif age_group == 'idoso':
+            df_filtered = df_filtered[df_filtered['Idade'] >= 60]
+        
+        diag_counts = df_filtered[diagnosis_col].value_counts().reset_index()
         diag_counts.columns = ['Diagnóstico', 'Contagem']
 
         fig = px.bar(
@@ -140,16 +206,27 @@ def register_callbacks(app) -> None:
         )
         return fig
 
-    @app.callback(Output('age-dist-univariate', 'figure'), Input('tabs', 'value'))
-    def update_age_distribution(tab):
+    @app.callback(
+        Output('age-dist-univariate', 'figure'),
+        [
+            Input('tabs', 'value'),
+            Input('overview-gender-filter', 'value'),
+        ]
+    )
+    def update_age_distribution(tab, gender):
         if tab != 'tab-overview':
             return go.Figure()
 
         ctx = get_context()
-        fig = px.histogram(ctx.df, x='Idade', nbins=30, color_discrete_sequence=[COLORS['primary']])
+        df_filtered = ctx.df.copy()
+        
+        if gender != 'todos':
+            df_filtered = df_filtered[df_filtered['Gênero'] == gender]
+        
+        fig = px.histogram(df_filtered, x='Idade', nbins=30, color_discrete_sequence=[COLORS['primary']])
 
-        mean_age = ctx.df['Idade'].mean()
-        median_age = ctx.df['Idade'].median()
+        mean_age = df_filtered['Idade'].mean()
+        median_age = df_filtered['Idade'].median()
         fig.add_vline(x=mean_age, line_dash='dash', line_color=COLORS['accent'], annotation_text=f'Média: {mean_age:.1f}')
         fig.add_vline(x=median_age, line_dash='dot', line_color=COLORS['accent_secondary'], annotation_text=f'Mediana: {median_age:.1f}')
 
@@ -165,13 +242,30 @@ def register_callbacks(app) -> None:
         )
         return fig
 
-    @app.callback(Output('gender-dist-univariate', 'figure'), Input('tabs', 'value'))
-    def update_gender_distribution(tab):
+    @app.callback(
+        Output('gender-dist-univariate', 'figure'),
+        [
+            Input('tabs', 'value'),
+            Input('overview-age-filter', 'value'),
+        ]
+    )
+    def update_gender_distribution(tab, age_group):
         if tab != 'tab-overview':
             return go.Figure()
 
         ctx = get_context()
-        gender_counts = ctx.df['Gênero'].value_counts().reset_index()
+        df_filtered = ctx.df.copy()
+        
+        if age_group == 'crianca':
+            df_filtered = df_filtered[df_filtered['Idade'] <= 12]
+        elif age_group == 'adolescente':
+            df_filtered = df_filtered[df_filtered['Idade'].between(13, 17)]
+        elif age_group == 'adulto':
+            df_filtered = df_filtered[df_filtered['Idade'].between(18, 59)]
+        elif age_group == 'idoso':
+            df_filtered = df_filtered[df_filtered['Idade'] >= 60]
+        
+        gender_counts = df_filtered['Gênero'].value_counts().reset_index()
         gender_counts.columns = ['Gênero', 'Contagem']
         gender_counts['Gênero'] = gender_counts['Gênero'].map({0: 'Feminino', 1: 'Masculino'})
 
@@ -195,12 +289,33 @@ def register_callbacks(app) -> None:
         )
         return fig
 
-    @app.callback(Output('climate-vars-distribution', 'figure'), Input('tabs', 'value'))
-    def update_climate_distribution(tab):
+    @app.callback(
+        Output('climate-vars-distribution', 'figure'),
+        [
+            Input('tabs', 'value'),
+            Input('overview-gender-filter', 'value'),
+            Input('overview-age-filter', 'value'),
+        ]
+    )
+    def update_climate_distribution(tab, gender, age_group):
         if tab != 'tab-overview':
             return go.Figure()
 
         ctx = get_context()
+        df_filtered = ctx.df.copy()
+        
+        if gender != 'todos':
+            df_filtered = df_filtered[df_filtered['Gênero'] == gender]
+        
+        if age_group == 'crianca':
+            df_filtered = df_filtered[df_filtered['Idade'] <= 12]
+        elif age_group == 'adolescente':
+            df_filtered = df_filtered[df_filtered['Idade'].between(13, 17)]
+        elif age_group == 'adulto':
+            df_filtered = df_filtered[df_filtered['Idade'].between(18, 59)]
+        elif age_group == 'idoso':
+            df_filtered = df_filtered[df_filtered['Idade'] >= 60]
+        
         if not ctx.climatic_vars:
             return go.Figure()
 
@@ -209,7 +324,7 @@ def register_callbacks(app) -> None:
 
         for idx, var in enumerate(ctx.climatic_vars, 1):
             fig.add_trace(
-                go.Histogram(x=ctx.df[var], name=var, marker_color=colors[(idx - 1) % len(colors)]),
+                go.Histogram(x=df_filtered[var], name=var, marker_color=colors[(idx - 1) % len(colors)]),
                 row=idx,
                 col=1,
             )
