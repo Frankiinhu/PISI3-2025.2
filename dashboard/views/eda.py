@@ -216,19 +216,30 @@ def create_layout() -> html.Div:
 def register_callbacks(app) -> None:
     diagnosis_col = lambda: (get_context().diagnosis_cols[0] if get_context().diagnosis_cols else 'Diagnóstico')
 
-    @app.callback(Output('symptom-frequency-graphs', 'figure'), [Input('symptom-selector', 'value'), Input('tabs', 'value')])
-    def update_symptom_frequency(selected_symptoms, tab):
+    @app.callback(
+        Output('symptom-frequency-graphs', 'figure'),
+        [
+            Input('symptom-selector', 'value'),
+            Input('tabs', 'value'),
+            Input('gender-filter', 'value'),
+        ]
+    )
+    def update_symptom_frequency(selected_symptoms, tab, gender):
         if tab != 'tab-eda' or not selected_symptoms:
             return go.Figure()
 
         ctx = get_context()
+        df_filtered = ctx.df.copy()
+        if gender != 'todos':
+            df_filtered = df_filtered[df_filtered['Gênero'] == gender]
+        
         rows = (len(selected_symptoms) + 1) // 2
         fig = make_subplots(rows=rows, cols=2, subplot_titles=selected_symptoms, vertical_spacing=0.16, horizontal_spacing=0.1)
 
         for idx, symptom in enumerate(selected_symptoms):
-            if symptom not in ctx.df.columns:
+            if symptom not in df_filtered.columns:
                 continue
-            freq = ctx.df.groupby(diagnosis_col())[symptom].sum().reset_index()
+            freq = df_filtered.groupby(diagnosis_col())[symptom].sum().reset_index()
             freq.columns = ['Diagnóstico', 'Contagem']
             row, col = divmod(idx, 2)
             fig.add_trace(
@@ -246,14 +257,24 @@ def register_callbacks(app) -> None:
         fig.update_xaxes(tickangle=-45)
         return fig
 
-    @app.callback(Output('correlation-matrix-graph', 'figure'), Input('tabs', 'value'))
-    def update_correlation_matrix(tab):
+    @app.callback(
+        Output('correlation-matrix-graph', 'figure'),
+        [
+            Input('tabs', 'value'),
+            Input('gender-filter', 'value'),
+        ]
+    )
+    def update_correlation_matrix(tab, gender):
         if tab != 'tab-eda':
             return go.Figure()
 
         ctx = get_context()
+        df_filtered = ctx.df.copy()
+        if gender != 'todos':
+            df_filtered = df_filtered[df_filtered['Gênero'] == gender]
+        
         base_features = ['Idade', 'Gênero', 'Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)']
-        available_base = [feature for feature in base_features if feature in ctx.df.columns]
+        available_base = [feature for feature in base_features if feature in df_filtered.columns]
 
         top_additional: list[str] = []
         if has_feature_importances():
@@ -264,14 +285,14 @@ def register_callbacks(app) -> None:
         if not top_additional:
             filtered_symptoms = [col for col in ctx.symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
             if filtered_symptoms:
-                symptom_sums = ctx.df[filtered_symptoms].sum().sort_values(ascending=False)
+                symptom_sums = df_filtered[filtered_symptoms].sum().sort_values(ascending=False)
                 top_additional = symptom_sums.head(10).index.tolist()
 
         features = available_base + top_additional
         if not features:
             return go.Figure()
 
-        corr = ctx.df[features].corr()
+        corr = df_filtered[features].corr()
         fig = go.Figure(
             data=go.Heatmap(
                 z=corr.values,
@@ -294,13 +315,22 @@ def register_callbacks(app) -> None:
         fig.update_xaxes(tickangle=-45)
         return fig
 
-    @app.callback(Output('age-temp-distribution', 'figure'), Input('tabs', 'value'))
-    def update_age_temp_distribution(tab):
+    @app.callback(
+        Output('age-temp-distribution', 'figure'),
+        [
+            Input('tabs', 'value'),
+            Input('gender-filter', 'value'),
+        ]
+    )
+    def update_age_temp_distribution(tab, gender):
         if tab != 'tab-eda':
             return go.Figure()
 
         ctx = get_context()
         df_temp = ctx.df.copy()
+        if gender != 'todos':
+            df_temp = df_temp[df_temp['Gênero'] == gender]
+        
         df_temp['Faixa Temperatura'] = pd.cut(
             df_temp['Temperatura (°C)'],
             bins=[0, 15, 20, 25, 30, np.inf],
@@ -335,8 +365,14 @@ def register_callbacks(app) -> None:
         )
         return fig
 
-    @app.callback(Output('wind-respiratory-scatter', 'figure'), Input('tabs', 'value'))
-    def update_wind_respiratory_scatter(tab):
+    @app.callback(
+        Output('wind-respiratory-scatter', 'figure'),
+        [
+            Input('tabs', 'value'),
+            Input('gender-filter', 'value'),
+        ]
+    )
+    def update_wind_respiratory_scatter(tab, gender):
         if tab != 'tab-eda':
             return go.Figure()
 
@@ -356,6 +392,9 @@ def register_callbacks(app) -> None:
             return fig
 
         df = ctx.df.copy()
+        if gender != 'todos':
+            df = df[df['Gênero'] == gender]
+        
         df['Freq_Respiratórios'] = df[available].sum(axis=1) / len(available)
         df['Wind_Bins'] = pd.cut(df['Velocidade do Vento (km/h)'], bins=20)
         grouped = df.groupby('Wind_Bins').agg({
@@ -405,15 +444,26 @@ def register_callbacks(app) -> None:
         return fig
 
     def _climate_box_plot(column: str, graph_id: str, color: str) -> None:
-        @app.callback(Output(graph_id, 'figure'), Input('tabs', 'value'))
-        def _update(tab: str, data_column: str = column, graph_color: str = color):
+        @app.callback(
+            Output(graph_id, 'figure'),
+            [
+                Input('tabs', 'value'),
+                Input('gender-filter', 'value'),
+            ]
+        )
+        def _update(tab: str, gender, data_column: str = column, graph_color: str = color):
             if tab != 'tab-eda':
                 return go.Figure()
             ctx = get_context()
             if data_column not in ctx.df.columns:
                 return go.Figure()
+            
+            df_filtered = ctx.df.copy()
+            if gender != 'todos':
+                df_filtered = df_filtered[df_filtered['Gênero'] == gender]
+            
             fig = px.box(
-                ctx.df,
+                df_filtered,
                 x=diagnosis_col(),
                 y=data_column,
                 color_discrete_sequence=[graph_color],
@@ -433,21 +483,31 @@ def register_callbacks(app) -> None:
     _climate_box_plot('Umidade', 'humidity-diagnosis-graph', COLORS['primary'])
     _climate_box_plot('Velocidade do Vento (km/h)', 'wind-diagnosis-graph', COLORS['accent_secondary'])
 
-    @app.callback(Output('symptom-diagnosis-correlation', 'figure'), Input('tabs', 'value'))
-    def update_symptom_diagnosis_correlation(tab):
+    @app.callback(
+        Output('symptom-diagnosis-correlation', 'figure'),
+        [
+            Input('tabs', 'value'),
+            Input('gender-filter', 'value'),
+        ]
+    )
+    def update_symptom_diagnosis_correlation(tab, gender):
         if tab != 'tab-eda':
             return go.Figure()
 
         ctx = get_context()
+        df_filtered = ctx.df.copy()
+        if gender != 'todos':
+            df_filtered = df_filtered[df_filtered['Gênero'] == gender]
+        
         filtered_symptoms = [col for col in ctx.symptom_cols if 'HIV' not in col.upper() and 'AIDS' not in col.upper()]
         if not filtered_symptoms:
             return go.Figure()
 
-        top_symptoms = ctx.df[filtered_symptoms].sum().sort_values(ascending=False).head(20).index.tolist()
-        diagnoses = sorted(ctx.df[diagnosis_col()].unique())
+        top_symptoms = df_filtered[filtered_symptoms].sum().sort_values(ascending=False).head(20).index.tolist()
+        diagnoses = sorted(df_filtered[diagnosis_col()].unique())
         matrix = []
         for diag in diagnoses:
-            subset = ctx.df[ctx.df[diagnosis_col()] == diag]
+            subset = df_filtered[df_filtered[diagnosis_col()] == diag]
             proportions = [subset[symptom].mean() if symptom in subset.columns else 0 for symptom in top_symptoms]
             matrix.append(proportions)
 
