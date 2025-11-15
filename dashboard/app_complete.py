@@ -9,6 +9,7 @@ Análise Exploratória de Doenças Relacionadas ao Clima
 from typing import Any
 
 import dash
+import dash_bootstrap_components as dbc
 from dash import Input, Output, dcc, html
 import plotly.express as px
 import plotly.graph_objects as go
@@ -155,7 +156,7 @@ from dashboard.core.theme import COLORS, INDEX_STRING, metrics_unavailable_figur
 from dashboard.views import eda, overview
 
 
-app = dash.Dash(__name__, suppress_callback_exceptions=True)
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 app.title = "NimbusVita - Análise de Doenças Climáticas"
 # Usar o INDEX_STRING centralizado definido em dashboard.core.theme para evitar duplicação
 app.index_string = INDEX_STRING
