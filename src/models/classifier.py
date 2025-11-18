@@ -9,11 +9,12 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (accuracy_score, f1_score, precision_score,
-                             recall_score)
+from sklearn.metrics import (accuracy_score, balanced_accuracy_score, f1_score, 
+                             precision_score, recall_score)
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
+from imblearn.over_sampling import SMOTE
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ class DiagnosisClassifier:
         self.feature_names = None
         self.feature_importances = None
         self.metrics: Dict[str, float] | None = None
+        self.shap_values = None
+        self.shap_data = None
 
     def prepare_data(
         self,
@@ -82,9 +85,13 @@ class DiagnosisClassifier:
         y_pred = self.model.predict(X_test)
         metrics = {
             'accuracy': float(accuracy_score(y_test, y_pred)),
-            'precision': float(precision_score(y_test, y_pred, average='weighted', zero_division=0)),
-            'recall': float(recall_score(y_test, y_pred, average='weighted', zero_division=0)),
-            'f1_score': float(f1_score(y_test, y_pred, average='weighted', zero_division=0)),
+            'balanced_accuracy': float(balanced_accuracy_score(y_test, y_pred)),
+            'precision_weighted': float(precision_score(y_test, y_pred, average='weighted', zero_division=0)),
+            'recall_weighted': float(recall_score(y_test, y_pred, average='weighted', zero_division=0)),
+            'f1_weighted': float(f1_score(y_test, y_pred, average='weighted', zero_division=0)),
+            'precision_macro': float(precision_score(y_test, y_pred, average='macro', zero_division=0)),
+            'recall_macro': float(recall_score(y_test, y_pred, average='macro', zero_division=0)),
+            'f1_macro': float(f1_score(y_test, y_pred, average='macro', zero_division=0)),
         }
         self.metrics = metrics
         return metrics
@@ -127,7 +134,8 @@ class DiagnosisClassifier:
         X_train: np.ndarray,
         X_test: np.ndarray,
         y_train: np.ndarray,
-        y_test: np.ndarray
+        y_test: np.ndarray,
+        use_smote: bool = False
     ) -> pd.DataFrame:
         candidates = {
             'Logistic Regression': LogisticRegression(max_iter=1000, n_jobs=None),
@@ -135,6 +143,12 @@ class DiagnosisClassifier:
             'Random Forest': RandomForestClassifier(n_estimators=300, random_state=self.random_state, n_jobs=-1),
             'Gradient Boosting': GradientBoostingClassifier(random_state=self.random_state),
         }
+        
+        # Apply SMOTE if requested
+        if use_smote:
+            smote = SMOTE(random_state=self.random_state)
+            X_train, y_train = smote.fit_resample(X_train, y_train)
+        
         rows = []
         for name, clf in candidates.items():
             clf.fit(X_train, y_train)
@@ -142,11 +156,100 @@ class DiagnosisClassifier:
             rows.append({
                 'Modelo': name,
                 'Acurácia': float(accuracy_score(y_test, y_pred)),
-                'Precision': float(precision_score(y_test, y_pred, average='weighted', zero_division=0)),
-                'Recall': float(recall_score(y_test, y_pred, average='weighted', zero_division=0)),
-                'F1-Score': float(f1_score(y_test, y_pred, average='weighted', zero_division=0)),
+                'Acurácia Balanceada': float(balanced_accuracy_score(y_test, y_pred)),
+                'Precision (Macro)': float(precision_score(y_test, y_pred, average='macro', zero_division=0)),
+                'Recall (Macro)': float(recall_score(y_test, y_pred, average='macro', zero_division=0)),
+                'F1-Score (Macro)': float(f1_score(y_test, y_pred, average='macro', zero_division=0)),
             })
-        return pd.DataFrame(rows).sort_values('F1-Score', ascending=False)
+        return pd.DataFrame(rows).sort_values('Acurácia Balanceada', ascending=False)
+
+    def train_with_smote(
+        self, 
+        X_train: np.ndarray, 
+        y_train: np.ndarray,
+        model_type: str = 'random_forest',
+        **kwargs
+    ) -> None:
+        """
+        Treina modelo aplicando SMOTE para balancear as classes.
+        
+        Args:
+            X_train: Features de treino
+            y_train: Labels de treino
+            model_type: Tipo de modelo ('random_forest', 'gradient_boosting', etc.)
+            **kwargs: Parâmetros adicionais para o modelo
+        """
+        logger.info("Aplicando SMOTE para balanceamento de classes...")
+        smote = SMOTE(random_state=self.random_state)
+        X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
+        
+        logger.info(f"Classes antes do SMOTE: {np.bincount(y_train.astype(int))}")
+        logger.info(f"Classes após SMOTE: {np.bincount(y_train_smote.astype(int))}")
+        
+        if model_type == 'random_forest':
+            self.train_random_forest(X_train_smote, y_train_smote, **kwargs)
+        elif model_type == 'gradient_boosting':
+            self.train_gradient_boosting(X_train_smote, y_train_smote, **kwargs)
+        else:
+            raise ValueError(f"model_type '{model_type}' não suportado.")
+
+    def calculate_shap_values(self, X_sample: np.ndarray, max_samples: int = 100) -> None:
+        """
+        Calcula SHAP values para o modelo treinado.
+        
+        Args:
+            X_sample: Amostra de dados para calcular SHAP values (já escalonada)
+            max_samples: Número máximo de amostras para usar no cálculo
+        """
+        if self.model is None:
+            raise RuntimeError("Modelo não treinado.")
+        
+        try:
+            import shap
+            
+            # Limitar número de amostras para performance
+            if len(X_sample) > max_samples:
+                indices = np.random.choice(len(X_sample), max_samples, replace=False)
+                X_sample = X_sample[indices]
+            
+            # TreeExplainer para modelos baseados em árvores (Random Forest, Gradient Boosting)
+            if hasattr(self.model, 'estimators_'):
+                logger.info("Calculando SHAP values com TreeExplainer...")
+                explainer = shap.TreeExplainer(self.model)
+                self.shap_values = explainer.shap_values(X_sample)
+                self.shap_data = X_sample
+                logger.info(f"SHAP values calculados para {len(X_sample)} amostras.")
+            else:
+                logger.warning("Modelo não suporta TreeExplainer. Use modelos baseados em árvores.")
+        except ImportError:
+            logger.error("Biblioteca 'shap' não instalada. Execute: pip install shap")
+        except Exception as e:
+            logger.error(f"Erro ao calcular SHAP values: {e}")
+
+    def compare_with_without_smote(
+        self,
+        X_train: np.ndarray,
+        X_test: np.ndarray,
+        y_train: np.ndarray,
+        y_test: np.ndarray
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        Compara performance de modelos com e sem SMOTE.
+        
+        Returns:
+            Dict com 'base' e 'smote' DataFrames de comparação
+        """
+        logger.info("Comparando modelos: Base vs SMOTE")
+        
+        # Modelos sem SMOTE
+        df_base = self.compare_models(X_train, X_test, y_train, y_test, use_smote=False)
+        df_base['Versão'] = 'Base'
+        
+        # Modelos com SMOTE
+        df_smote = self.compare_models(X_train, X_test, y_train, y_test, use_smote=True)
+        df_smote['Versão'] = 'Com SMOTE'
+        
+        return {'base': df_base, 'smote': df_smote}
 
     def save_model(self, filepath: str) -> None:
         payload = {
@@ -156,6 +259,8 @@ class DiagnosisClassifier:
             'feature_names': self.feature_names,
             'metrics': self.metrics,
             'random_state': self.random_state,
+            'shap_values': self.shap_values,
+            'shap_data': self.shap_data,
         }
         joblib.dump(payload, filepath)
         logger.info(f"Modelo salvo em: {filepath}")
@@ -168,4 +273,6 @@ class DiagnosisClassifier:
         self.feature_names = payload['feature_names']
         self.metrics = payload.get('metrics')
         self.random_state = payload.get('random_state', self.random_state)
+        self.shap_values = payload.get('shap_values')
+        self.shap_data = payload.get('shap_data')
         logger.info(f"Modelo carregado de: {filepath}")

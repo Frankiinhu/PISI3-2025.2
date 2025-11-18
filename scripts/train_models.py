@@ -18,16 +18,21 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def train_classifier(data_path: Path | str, save_path: Path | str):
+def train_classifier(data_path: Path | str, save_path: Path | str, use_smote: bool = False):
     """
     Treina modelo de classificação
     
     Args:
         data_path: Caminho para o dataset
         save_path: Caminho para salvar o modelo
+        use_smote: Se True, aplica SMOTE para balanceamento de classes
     """
     logger.info("=" * 50)
     logger.info("TREINAMENTO DO CLASSIFICADOR")
+    if use_smote:
+        logger.info("⚖️  MODO: COM SMOTE (Balanceamento de Classes)")
+    else:
+        logger.info("📊 MODO: BASE (Sem Balanceamento)")
     logger.info("=" * 50)
 
     data_path = Path(data_path)
@@ -42,39 +47,61 @@ def train_classifier(data_path: Path | str, save_path: Path | str):
     logger.info("Preparando dados para treinamento...")
     X_train, X_test, y_train, y_test = classifier.prepare_data(df, test_size=0.2)
 
-    logger.info("Treinando Random Forest...")
-    classifier.train_random_forest(
-        X_train, y_train,
-        n_estimators=200,
-        max_depth=20,
-        min_samples_split=5,
-        min_samples_leaf=2
-    )
+    if use_smote:
+        logger.info("Treinando Random Forest com SMOTE...")
+        classifier.train_with_smote(
+            X_train, y_train,
+            model_type='random_forest',
+            n_estimators=200,
+            max_depth=20,
+            min_samples_split=5,
+            min_samples_leaf=2
+        )
+    else:
+        logger.info("Treinando Random Forest...")
+        classifier.train_random_forest(
+            X_train, y_train,
+            n_estimators=200,
+            max_depth=20,
+            min_samples_split=5,
+            min_samples_leaf=2
+        )
 
     logger.info("Avaliando modelo...")
     metrics = classifier.evaluate(X_test, y_test)
 
-    logger.info("\nMétricas do Modelo:")
+    logger.info("\n📈 Métricas do Modelo:")
     logger.info(f"Acurácia: {metrics['accuracy']:.4f}")
-    logger.info(f"Precision: {metrics['precision']:.4f}")
-    logger.info(f"Recall: {metrics['recall']:.4f}")
-    logger.info(f"F1-Score: {metrics['f1_score']:.4f}")
+    logger.info(f"Acurácia Balanceada: {metrics['balanced_accuracy']:.4f}")
+    logger.info(f"Precision (Weighted): {metrics['precision_weighted']:.4f}")
+    logger.info(f"Recall (Weighted): {metrics['recall_weighted']:.4f}")
+    logger.info(f"F1-Score (Weighted): {metrics['f1_weighted']:.4f}")
+    logger.info(f"Precision (Macro): {metrics['precision_macro']:.4f}")
+    logger.info(f"Recall (Macro): {metrics['recall_macro']:.4f}")
+    logger.info(f"F1-Score (Macro): {metrics['f1_macro']:.4f}")
 
-    logger.info("\nRealizando validação cruzada...")
+    logger.info("\n🔄 Realizando validação cruzada...")
     cv_results = classifier.cross_validate(X_train, y_train, cv=5)
     logger.info(f"CV Accuracy: {cv_results['mean_score']:.4f} (+/- {cv_results['std_score']:.4f})")
 
-    logger.info("\nTop 10 Features Mais Importantes:")
+    logger.info("\n⭐ Top 10 Features Mais Importantes:")
     try:
         top_features = classifier.get_feature_importance(top_n=10)
         for feature, importance in top_features.items():
-            logger.info(f"{feature}: {importance:.4f}")
+            logger.info(f"  {feature}: {importance:.4f}")
     except AttributeError:
-        logger.info("Importância de features não disponível para este modelo.")
+        logger.info("  Importância de features não disponível para este modelo.")
+
+    logger.info("\n🔍 Calculando SHAP values...")
+    try:
+        classifier.calculate_shap_values(X_test, max_samples=100)
+        logger.info("  ✓ SHAP values calculados e salvos com o modelo")
+    except Exception as e:
+        logger.warning(f"  ⚠️  Erro ao calcular SHAP values: {e}")
 
     classifier.metrics = metrics
 
-    logger.info(f"\nSalvando modelo em: {save_path}")
+    logger.info(f"\n💾 Salvando modelo em: {save_path}")
     save_path.parent.mkdir(parents=True, exist_ok=True)
     classifier.save_model(str(save_path))
 
@@ -145,15 +172,16 @@ def main():
     parser.add_argument('--out-dir', default='models', help='Diretório para salvar os modelos')
     parser.add_argument('--classifier-name', default='classifier.joblib')
     parser.add_argument('--clusterer-name', default='clusterer.joblib')
-    parser.add_argument('--skip-classifier', action='store_true')
-    parser.add_argument('--skip-clusterer', action='store_true')
+    parser.add_argument('--skip-classifier', action='store_true', help='Pular treinamento do classificador')
+    parser.add_argument('--skip-clusterer', action='store_true', help='Pular treinamento do clusterizador')
+    parser.add_argument('--use-smote', action='store_true', help='Aplicar SMOTE para balanceamento de classes no classificador')
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not args.skip_classifier:
-        train_classifier(args.data, out_dir / args.classifier_name)
+        train_classifier(args.data, out_dir / args.classifier_name, use_smote=args.use_smote)
 
     if not args.skip_clusterer:
         train_clusterer(args.data, out_dir / args.clusterer_name)

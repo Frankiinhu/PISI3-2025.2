@@ -55,23 +55,30 @@ def load_data_context() -> DataContext:
     diagnosis_cols = feature_dict.get('diagnosis', []) or [feature_dict.get('target', 'Diagnóstico')]
     climatic_vars = feature_dict.get('climatic', [])
 
-    print("Carregando modelos locais (fallback)...")
+    print("Carregando modelos...")
     classifier = DiagnosisClassifier()
     clusterer = DiseaseClusterer()
 
+    # Tentar carregar do diretório models/ na raiz do projeto (onde train_models.py salva)
     try:
-        classifier_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'saved_models', 'classifier_model.pkl')
-        classifier.load_model(classifier_path)
-        print("✓ Classificador local carregado")
-    except Exception as exc:  # pragma: no cover - logging side effect
-        print(f"⚠ Classificador local não carregado: {exc}")
+        classifier_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'classifier.joblib')
+        if os.path.exists(classifier_path):
+            classifier.load_model(classifier_path)
+            print(f"✓ Classificador carregado de: {classifier_path}")
+        else:
+            print(f"⚠ Arquivo não encontrado: {classifier_path}")
+    except Exception as exc:
+        print(f"⚠ Erro ao carregar classificador: {exc}")
 
     try:
-        clusterer_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'saved_models', 'clustering_model.pkl')
-        clusterer.load_model(clusterer_path)
-        print("✓ Clusterizador local carregado")
-    except Exception as exc:  # pragma: no cover - logging side effect
-        print(f"⚠ Clusterizador local não carregado: {exc}")
+        clusterer_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'clusterer.joblib')
+        if os.path.exists(clusterer_path):
+            clusterer.load_model(clusterer_path)
+            print(f"✓ Clusterizador carregado de: {clusterer_path}")
+        else:
+            print(f"⚠ Arquivo não encontrado: {clusterer_path}")
+    except Exception as exc:
+        print(f"⚠ Erro ao carregar clusterizador: {exc}")
 
     _context = DataContext(
         df=df_global,

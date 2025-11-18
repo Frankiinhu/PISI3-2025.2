@@ -46,6 +46,8 @@ data/*.csv
 data/*.json
 data/*.xlsx
 !data/README.md
+debug_shap.py
+test_metrics.py
 
 # Models
 models/
