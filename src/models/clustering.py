@@ -39,18 +39,40 @@ class DiseaseClusterer:
         logger.info(f"Dados preparados para clusterização: {X_scaled.shape}")
         return X_scaled
 
-    def find_optimal_clusters(self, X: np.ndarray, max_clusters: int = 10) -> Dict:
+    def find_optimal_clusters(self, X: np.ndarray, max_clusters: int = 10, sample_size: int = 1000) -> Dict:
         ks = list(range(2, max_clusters + 1))
         silhouettes = []
         inertias = []
+        
+        # Use sampling for silhouette score if dataset is large
+        use_sampling = len(X) > sample_size
+        X_sample = None
+        sample_indices = None
+        
+        if use_sampling:
+            logger.info(f"Using sample of {sample_size} points for silhouette calculation (dataset has {len(X)} points)")
+            rng = np.random.RandomState(self.random_state)
+            sample_indices = rng.choice(len(X), size=min(sample_size, len(X)), replace=False)
+            X_sample = X[sample_indices]
+        
         for k in ks:
             km = KMeans(n_clusters=k, random_state=self.random_state, n_init='auto')
             km.fit(X)
             inertias.append(float(km.inertia_))
             labels = km.labels_
+            
             # Silhouette só é válido se > 1 cluster e < n amostras
             if len(np.unique(labels)) > 1:
-                silhouettes.append(float(silhouette_score(X, labels)))
+                try:
+                    if use_sampling and X_sample is not None and sample_indices is not None:
+                        # Calculate silhouette on sample
+                        sample_labels = labels[sample_indices]
+                        silhouettes.append(float(silhouette_score(X_sample, sample_labels)))
+                    else:
+                        silhouettes.append(float(silhouette_score(X, labels)))
+                except Exception as e:
+                    logger.warning(f"Error calculating silhouette for k={k}: {e}")
+                    silhouettes.append(float('nan'))
             else:
                 silhouettes.append(float('nan'))
 
@@ -80,14 +102,25 @@ class DiseaseClusterer:
         self.model.fit(X)
         self.labels_ = self.model.labels_
 
-    def evaluate(self, X: np.ndarray) -> Dict:
+    def evaluate(self, X: np.ndarray, sample_size: int = 1000) -> Dict:
         if self.model is None:
             raise RuntimeError("Modelo não treinado.")
         labels = self.model.labels_
         n_clusters = len(np.unique(labels))
         metrics = {'n_clusters': int(n_clusters)}
+        
         if n_clusters > 1:
-            metrics['silhouette_score'] = float(silhouette_score(X, labels))
+            # Use sampling for silhouette if dataset is large
+            if len(X) > sample_size:
+                logger.info(f"Using sample of {sample_size} points for silhouette calculation")
+                rng = np.random.RandomState(self.random_state)
+                sample_indices = rng.choice(len(X), size=min(sample_size, len(X)), replace=False)
+                X_sample = X[sample_indices]
+                sample_labels = labels[sample_indices]
+                metrics['silhouette_score'] = float(silhouette_score(X_sample, sample_labels))
+            else:
+                metrics['silhouette_score'] = float(silhouette_score(X, labels))
+            
             metrics['davies_bouldin_score'] = float(davies_bouldin_score(X, labels))
             metrics['calinski_harabasz_score'] = float(calinski_harabasz_score(X, labels))
         else:

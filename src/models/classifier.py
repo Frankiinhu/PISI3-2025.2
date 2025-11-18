@@ -101,7 +101,8 @@ class DiagnosisClassifier:
         estimator = self.model if self.model is not None else RandomForestClassifier(
             n_estimators=200, random_state=self.random_state, n_jobs=-1
         )
-        scores = cross_val_score(estimator, X, y, cv=cv, scoring='accuracy', n_jobs=-1)
+        # Use n_jobs=1 to avoid memory issues with parallel processing
+        scores = cross_val_score(estimator, X, y, cv=cv, scoring='accuracy', n_jobs=1)
         return {'mean_score': float(scores.mean()), 'std_score': float(scores.std())}
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -122,11 +123,13 @@ class DiagnosisClassifier:
         if hasattr(self.model, "feature_importances_") and self.feature_names is not None:
             importances = pd.Series(self.model.feature_importances_, index=self.feature_names)
             return importances.sort_values(ascending=False).head(top_n)
-        # Fallback: coef_ linear (ex.: LogisticRegression)
+        # Fallback: coef_ linear (ex.: LogisticRegression, SVC linear)
         if hasattr(self.model, "coef_") and self.feature_names is not None:
-            coefs = np.abs(self.model.coef_).mean(axis=0)
-            importances = pd.Series(coefs, index=self.feature_names)
-            return importances.sort_values(ascending=False).head(top_n)
+            coef_attr = getattr(self.model, "coef_", None)
+            if coef_attr is not None:
+                coefs = np.abs(coef_attr).mean(axis=0)
+                importances = pd.Series(coefs, index=self.feature_names)
+                return importances.sort_values(ascending=False).head(top_n)
         raise AttributeError("Importância de features não disponível para este modelo.")
 
     def compare_models(
@@ -147,7 +150,9 @@ class DiagnosisClassifier:
         # Apply SMOTE if requested
         if use_smote:
             smote = SMOTE(random_state=self.random_state)
-            X_train, y_train = smote.fit_resample(X_train, y_train)
+            X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+            X_train = np.asarray(X_train_resampled)
+            y_train = np.asarray(y_train_resampled)
         
         rows = []
         for name, clf in candidates.items():
@@ -181,7 +186,9 @@ class DiagnosisClassifier:
         """
         logger.info("Aplicando SMOTE para balanceamento de classes...")
         smote = SMOTE(random_state=self.random_state)
-        X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
+        X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+        X_train_smote = np.asarray(X_train_resampled)
+        y_train_smote = np.asarray(y_train_resampled)
         
         logger.info(f"Classes antes do SMOTE: {np.bincount(y_train.astype(int))}")
         logger.info(f"Classes após SMOTE: {np.bincount(y_train_smote.astype(int))}")
@@ -205,7 +212,7 @@ class DiagnosisClassifier:
             raise RuntimeError("Modelo não treinado.")
         
         try:
-            import shap
+            import shap  # type: ignore
             
             # Limitar número de amostras para performance
             if len(X_sample) > max_samples:
@@ -222,9 +229,14 @@ class DiagnosisClassifier:
             else:
                 logger.warning("Modelo não suporta TreeExplainer. Use modelos baseados em árvores.")
         except ImportError:
-            logger.error("Biblioteca 'shap' não instalada. Execute: pip install shap")
+            logger.warning("Biblioteca 'shap' não instalada. SHAP values não serão calculados.")
+            logger.info("Para instalar: pip install shap")
+            self.shap_values = None
+            self.shap_data = None
         except Exception as e:
             logger.error(f"Erro ao calcular SHAP values: {e}")
+            self.shap_values = None
+            self.shap_data = None
 
     def compare_with_without_smote(
         self,
