@@ -8,6 +8,7 @@ scipy==1.16.2
 # Machine Learning
 scikit-learn==1.7.2
 joblib==1.5.2
+imbalanced-learn>=0.11.0  # SMOTE for handling class imbalance
 
 # Visualização e Dashboard
 dash==3.2.0
@@ -15,3 +16,6 @@ plotly==6.3.1
 matplotlib==3.10.7
 seaborn==0.13.2
 dash-bootstrap-components==1.7.0
+
+# Utilities
+tqdm>=4.65.0  # Progress bars for long operations
