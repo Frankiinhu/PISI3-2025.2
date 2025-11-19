@@ -20,3 +20,6 @@ dash-bootstrap-components==1.7.0
 
 # Utilities
 tqdm>=4.65.0  # Progress bars for long operations
+
+# Dataset
+c:\PISI3-2025.2\data\DATASET FINAL WRDP.csv
