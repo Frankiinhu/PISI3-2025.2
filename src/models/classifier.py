@@ -479,27 +479,55 @@ class DiagnosisClassifier:
         self.smote_comparison_results = payload.get('smote_comparison_results')
         logger.info(f"Modelo carregado de: {filepath}")
 
-        def explain_prediction(self, X_instance: np.ndarray, top_n: int = 5) -> list:
-            if self.model is None:
-                raise RuntimeError("Modelo não treinado.")
+    def explain_prediction(self, X_instance: np.ndarray, top_n: int = 5) -> list:
+        """
+        Explica uma predição individual usando SHAP values.
+        
+        Args:
+            X_instance: Instância única para explicar (shape: 1, n_features)
+            top_n: Número de features mais importantes para retornar
+            
+        Returns:
+            Lista de dicionários com feature, impact (SHAP value) e value (input value)
+        """
+        if self.model is None:
+            raise RuntimeError("Modelo não treinado.")
+        
+        try:
+            import shap
+        except ImportError:
+            raise ImportError("Biblioteca 'shap' não instalada. Execute: pip install shap")
+        
+        # Criar explainer
         explainer = shap.TreeExplainer(self.model)
         shap_values = explainer.shap_values(X_instance)
+        
+        # Fazer predição para saber qual classe foi predita
         prediction_idx = self.model.predict(X_instance)[0]
-        class_shap_values = shap_values[prediction_idx][0] if isinstance(shap_values, list) else shap_values[0]
-
+        
+        # Obter SHAP values da classe predita
+        if isinstance(shap_values, list):
+            # Multiclass: lista de arrays (um por classe)
+            class_shap_values = shap_values[prediction_idx][0]
+        else:
+            # Binary ou formato diferente
+            class_shap_values = shap_values[0]
+        
         explanations = []
-        feature_names = self.feature_names if self.feature_names else [f"Feature {i}" for i in range(len(class_shap_values))]
-
-        for name, value, input_val in zip(feature_names, class_shap_values, X_instance[0]):
-            # Filtra features com impacto zero (irrelevantes para este caso)
-            if abs(value) > 0.01: 
+        feature_names_list = self.feature_names if self.feature_names else [
+            f"Feature {i}" for i in range(len(class_shap_values))
+        ]
+        
+        for name, shap_val, input_val in zip(feature_names_list, class_shap_values, X_instance[0]):
+            # Filtrar features com impacto muito baixo
+            if abs(shap_val) > 0.01:
                 explanations.append({
                     "feature": name,
-                    "impact": float(value), # Valor SHAP (+ aumenta risco, - diminui)
-                    "value": float(input_val) # O valor que o usuário inseriu (ex: 38.5 graus)
+                    "impact": float(shap_val),     # Valor SHAP (+ aumenta risco, - diminui)
+                    "value": float(input_val)      # O valor que o usuário inseriu
                 })
-
-        # Ordena pelo impacto absoluto (as mais importantes primeiro)
+        
+        # Ordenar por impacto absoluto (mais importante primeiro)
         explanations.sort(key=lambda x: abs(x['impact']), reverse=True)
         
         return explanations[:top_n]
