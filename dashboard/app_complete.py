@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -153,6 +154,7 @@ def _prepare_climate_clusters(k: int) -> tuple[pd.DataFrame, list[str]]:
     return plot_df, climate_vars
 
 from dashboard.core.theme import COLORS, INDEX_STRING, metrics_unavailable_figure
+from dashboard.core.theme_manager import ThemeManager, DARK_THEME, LIGHT_THEME
 from dashboard.views import eda, overview, classification, pipeline_tuning
 
 
@@ -168,8 +170,12 @@ app.layout = html.Div(style={
     'fontFamily': "'Inter', 'Segoe UI', 'Roboto', sans-serif",
     'background': f'linear-gradient(135deg, {COLORS["background"]} 0%, {COLORS["background_light"]} 100%)'
 }, children=[
+    # Store para tema
+    dcc.Store(id='theme-store', data={'theme': 'dark'}),
+    
     # Header com gradiente
     html.Div(className='header', style={
+        'position': 'relative',
         'background': f'linear-gradient(135deg, {COLORS["primary"]} 0%, {COLORS["primary_light"]} 100%)',
         'padding': '30px 20px',
         'marginBottom': '30px',
@@ -203,7 +209,32 @@ app.layout = html.Div(style={
                        'fontSize': '0.95em',
                        'fontWeight': '400'
                    })
-        ])
+        ]),
+        # Theme toggle button
+        dbc.Button(
+            id='theme-toggle-btn',
+            className='theme-toggle-btn',
+            style={
+                'position': 'absolute',
+                'right': '30px',
+                'top': '50%',
+                'transform': 'translateY(-50%)',
+                'width': '50px',
+                'height': '50px',
+                'borderRadius': '50%',
+                'border': '2px solid rgba(255,255,255,0.3)',
+                'backgroundColor': 'rgba(255,255,255,0.1)',
+                'color': 'white',
+                'fontSize': '1.3em',
+                'cursor': 'pointer',
+                'transition': 'all 0.3s ease',
+                'display': 'flex',
+                'alignItems': 'center',
+                'justifyContent': 'center',
+                'padding': '0'
+            },
+            children='🌙'
+        )
     ]),
     
     # Container para tabs
@@ -315,6 +346,40 @@ app.layout = html.Div(style={
         html.Div(id='tabs-content', style={'padding': '30px 0'})
     ])
 ])
+
+
+# =====================================================================
+# CALLBACKS
+# =====================================================================
+
+@app.callback(
+    [Output('theme-toggle-btn', 'children'),
+     Output('theme-store', 'data')],
+    [Input('theme-toggle-btn', 'n_clicks')],
+    prevent_initial_call=False
+)
+def toggle_theme(n_clicks):
+    """Toggle theme between dark and light."""
+    theme = ThemeManager.toggle_theme()
+    icon = ThemeManager.get_theme_icon()
+    return [icon, {'theme': theme}]
+
+
+# Clientside callback to persist theme to localStorage
+app.clientside_callback(
+    """
+    function(data) {
+        if (data && data.theme) {
+            localStorage.setItem('nimbusvita-theme', data.theme);
+            sessionStorage.setItem('nimbusvita-current-theme', data.theme);
+        }
+        return data;
+    }
+    """,
+    Output('theme-store', 'id'),
+    Input('theme-store', 'data'),
+    prevent_initial_call=True
+)
 
 
 @app.callback(Output('tabs-content', 'children'),

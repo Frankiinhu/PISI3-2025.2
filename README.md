@@ -4,8 +4,25 @@ NimbusVita combina análise exploratória, modelagem de aprendizado de máquina 
 
 - Treinamento de modelos de classificação e clusterização a partir do dataset `DATASET FINAL WRDP.csv`.
 - Dashboard interativo (`dashboard/app_complete.py`) com métricas, PCA 3D, análise de clusters (k fixo e dinâmico) e visões climáticas.
+- **🎨 Sistema de Temas Escuro/Claro** com alternância dinâmica e persistência de preferência.
 
-� Estrutura Principal
+🎨 Novo: Sistema de Temas
+
+O dashboard agora oferece um **sistema completo de alternância de temas**:
+
+- **🌙 Tema Escuro**: Interface escura, ideal para ambientes com pouca luz
+- **☀️ Tema Claro**: Interface clara, ideal para ambientes bem iluminados
+- **💾 Persistência**: Sua preferência é salva automaticamente e recuperada ao recarregar
+- **⚡ Instantâneo**: Mudança de tema sem recarregar a página
+
+Para usar, clique no botão 🌙/☀️ no canto superior direito do header do dashboard.
+
+📚 Documentação de Temas:
+- `THEME_SYSTEM_DOCUMENTATION.md` - Documentação técnica completa
+- `USER_GUIDE_THEMES.md` - Guia para usuários finais
+- `THEME_SUMMARY.md` - Sumário executivo
+
+🏗️ Estrutura Principal
 
 ```
 PISI3-2025.2/
@@ -13,7 +30,12 @@ PISI3-2025.2/
 ├── dashboard/                # Aplicação Dash
 │   ├── app_complete.py       # Entry point do dashboard
 │   ├── components.py         # Utilidades de layout
-│   ├── core/                 # Contexto e tema
+│   ├── components_theme.py   # ✨ Componentes de temas
+│   ├── theme_integration.py  # ✨ Integração de temas
+│   ├── core/
+│   │   ├── data_context.py
+│   │   ├── theme.py          # 🔧 Temas e CSS (atualizado)
+│   │   └── theme_manager.py  # ✨ Gerenciador de temas
 │   ├── models/saved_models/  # Modelos pré-treinados (.pkl)
 │   └── views/                # Abas e callbacks
 ├── scripts/
@@ -22,7 +44,11 @@ PISI3-2025.2/
 │   ├── data_processing/      # DataLoader e EDA helpers
 │   └── models/               # Implementações de classificação/clusterização
 ├── requirements.txt
-└── README.md
+├── README.md
+├── THEME_SYSTEM_DOCUMENTATION.md  # ✨ Documentação técnica de temas
+├── USER_GUIDE_THEMES.md           # ✨ Guia para usuários
+├── THEME_SUMMARY.md               # ✨ Sumário executivo
+└── test_theme_integration.py      # ✨ Testes de temas
 ```
 
 �️ Preparação do Ambiente
