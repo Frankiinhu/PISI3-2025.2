@@ -39,50 +39,95 @@ def _filter_dropdown(component_id: str, label: str, options: Iterable[dict], val
     ], md=6, sm=12)
 
 
-def _kpi_card(icon: str, label: str, value: str, value_color: str, subtitle: str = '') -> html.Div:
-    """Enhanced KPI card with additional metrics display"""
+def _kpi_card(icon: str, label: str, value: str, value_color: str, subtitle: str = '', gradient: str = 'gradient_primary') -> html.Div:
+    """Enhanced KPI card with gradient and modern effects"""
+    gradient_map = {
+        'gradient_primary': COLORS.get('gradient_primary', 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'),
+        'gradient_success': COLORS.get('gradient_success', 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)'),
+        'gradient_warning': COLORS.get('gradient_warning', 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)'),
+        'gradient_error': COLORS.get('gradient_error', 'linear-gradient(135deg, #f87171 0%, #ef4444 100%)'),
+        'gradient_teal': COLORS.get('gradient_teal', 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)'),
+        'gradient_blue': COLORS.get('gradient_blue', 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'),
+    }
+    
+    selected_gradient = gradient_map.get(gradient, gradient_map['gradient_primary'])
+    
     return dbc.Col([
         html.Div([
+            # Barra de gradiente no topo
+            html.Div(style={
+                'position': 'absolute',
+                'top': '0',
+                'left': '0',
+                'right': '0',
+                'height': '4px',
+                'background': selected_gradient,
+                'borderRadius': '12px 12px 0 0',
+            }),
+            
+            # Ícone com efeito de glow
             html.Div([
                 html.Div(icon, style={
-                    'fontSize': '2.5em',
-                    'marginBottom': '8px',
-                    'textAlign': 'center'
-                }),
-                html.H6(label, style={
-                    'color': COLORS['text_secondary'],
-                    'margin': '0',
-                    'fontSize': '0.85em',
-                    'fontWeight': '500',
-                    'textTransform': 'uppercase',
-                    'letterSpacing': '0.5px',
-                    'textAlign': 'center'
-                }),
-                html.H3(value, style={
-                    'color': value_color,
-                    'margin': '10px 0 0 0',
-                    'fontSize': '2em',
-                    'fontWeight': '700',
-                    'textAlign': 'center'
-                }),
-                html.P(subtitle, style={
-                    'color': COLORS['text_secondary'],
-                    'margin': '6px 0 0 0',
-                    'fontSize': '0.75em',
-                    'textAlign': 'center'
-                }) if subtitle else None,
+                    'fontSize': '3em',
+                    'marginBottom': '12px',
+                    'textAlign': 'center',
+                    'filter': 'drop-shadow(0 0 10px rgba(102, 126, 234, 0.4))',
+                    'transition': 'all 0.3s ease',
+                })
             ], style={
-                'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-                'padding': '24px 16px',
+                'background': f'rgba(102, 126, 234, 0.1)',
+                'padding': '12px',
                 'borderRadius': '12px',
+                'marginBottom': '12px',
+                'backdropFilter': 'blur(10px)',
+            }),
+            
+            # Label
+            html.H6(label, style={
+                'color': COLORS['text_secondary'],
+                'margin': '0',
+                'fontSize': '0.8em',
+                'fontWeight': '600',
+                'textTransform': 'uppercase',
+                'letterSpacing': '1px',
+                'textAlign': 'center'
+            }),
+            
+            # Valor principal
+            html.H3(value, style={
+                'background': selected_gradient,
+                '-webkit-background-clip': 'text',
+                '-webkit-text-fill-color': 'transparent',
+                'backgroundClip': 'text',
+                'margin': '12px 0 0 0',
+                'fontSize': '2.2em',
+                'fontWeight': '800',
                 'textAlign': 'center',
-                'boxShadow': '0 8px 32px rgba(0,0,0,0.4)',
-                'border': f'1px solid {COLORS["border"]}',
-                'transition': 'transform 0.3s ease, box-shadow 0.3s ease',
-                'height': '100%'
-            }, className='kpi-card')
-        ], style={'height': '100%'})
-    ], md=6, lg=3, sm=6, xs=12, style={'marginBottom': '20px'})
+                'letterSpacing': '-0.5px',
+            }),
+            
+            # Subtítulo
+            html.P(subtitle, style={
+                'color': COLORS['text_secondary'],
+                'margin': '8px 0 0 0',
+                'fontSize': '0.75em',
+                'textAlign': 'center',
+                'fontWeight': '500',
+                'opacity': '0.8'
+            }) if subtitle else None,
+        ], style={
+            'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
+            'padding': '28px 20px',
+            'borderRadius': '12px',
+            'textAlign': 'center',
+            'boxShadow': '0 12px 40px rgba(0,0,0,0.3)',
+            'border': f'1px solid {COLORS["border"]}',
+            'transition': 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            'height': '100%',
+            'position': 'relative',
+            'overflow': 'hidden',
+        }, className='stat-card')
+    ], md=6, lg=2, sm=6, xs=12, style={'marginBottom': '20px'})
 
 
 def _alert_component(alert_type: str, title: str, message: str) -> dbc.Alert:
@@ -151,11 +196,11 @@ def create_layout() -> html.Div:
 
     # KPIs principais
     kpis_row = dbc.Row([
-        _kpi_card('📊', 'Total de Casos', f"{info['shape'][0]:,}", COLORS['accent'], 'Registros no dataset'),
-        _kpi_card('📈', 'Idade Média', f"{ctx.df['Idade'].mean():.1f} anos", COLORS['primary'], f"Min: {ctx.df['Idade'].min()}, Max: {ctx.df['Idade'].max()}"),
-        _kpi_card('👥', 'Distribuição de Gênero', f"{ctx.df['Gênero'].value_counts().iloc[0]:,}", COLORS['success'], 'Maior grupo'),
-        _kpi_card('🏥', 'Diagnósticos Únicos', str(ctx.df[diagnosis_col].nunique()), COLORS['warning'], f'Tipos de diagnóstico'),
-        _kpi_card('🤖', 'Modelo ML', model_status, model_color, f'Acurácia: {accuracy_text}'),
+        _kpi_card('📊', 'Total de Casos', f"{info['shape'][0]:,}", COLORS['accent'], 'Registros no dataset', 'gradient_blue'),
+        _kpi_card('📈', 'Idade Média', f"{ctx.df['Idade'].mean():.1f} anos", COLORS['primary'], f"Min: {ctx.df['Idade'].min()}, Max: {ctx.df['Idade'].max()}", 'gradient_primary'),
+        _kpi_card('👥', 'Distribuição', f"{ctx.df['Gênero'].value_counts().iloc[0]:,}", COLORS['success'], 'Maior grupo', 'gradient_success'),
+        _kpi_card('🏥', 'Diagnósticos', str(ctx.df[diagnosis_col].nunique()), COLORS['warning'], f'Tipos únicos', 'gradient_warning'),
+        _kpi_card('🤖', 'Modelo ML', model_status, model_color, f'Acurácia: {accuracy_text}', 'gradient_teal'),
     ], style={'marginBottom': '30px'})
 
     # Header
