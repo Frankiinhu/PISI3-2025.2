@@ -1,4 +1,4 @@
 """Dashboard views module."""
-from . import classification, tuning, eda, overview
+from . import classification, pipeline_tuning, eda, overview
 
-__all__ = ['classification', 'tuning', 'eda', 'overview']
+__all__ = ['classification', 'pipeline_tuning', 'eda', 'overview']

@@ -136,12 +136,26 @@ def create_layout() -> html.Div:
     info = ctx.eda.basic_info()
     diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
 
+    # Check model status
+    from ..core.data_context import is_classifier_available
+    model_available = is_classifier_available()
+    if model_available:
+        metrics = getattr(ctx.classifier, 'metrics', None)
+        accuracy_text = f"{metrics.get('balanced_accuracy', 0)*100:.1f}%" if metrics else 'N/A'
+        model_status = '✅ Treinado'
+        model_color = COLORS['success']
+    else:
+        accuracy_text = 'N/A'
+        model_status = '⚠️ Não Treinado'
+        model_color = COLORS['warning']
+
     # KPIs principais
     kpis_row = dbc.Row([
         _kpi_card('📊', 'Total de Casos', f"{info['shape'][0]:,}", COLORS['accent'], 'Registros no dataset'),
         _kpi_card('📈', 'Idade Média', f"{ctx.df['Idade'].mean():.1f} anos", COLORS['primary'], f"Min: {ctx.df['Idade'].min()}, Max: {ctx.df['Idade'].max()}"),
         _kpi_card('👥', 'Distribuição de Gênero', f"{ctx.df['Gênero'].value_counts().iloc[0]:,}", COLORS['success'], 'Maior grupo'),
         _kpi_card('🏥', 'Diagnósticos Únicos', str(ctx.df[diagnosis_col].nunique()), COLORS['warning'], f'Tipos de diagnóstico'),
+        _kpi_card('🤖', 'Modelo ML', model_status, model_color, f'Acurácia: {accuracy_text}'),
     ], style={'marginBottom': '30px'})
 
     # Header

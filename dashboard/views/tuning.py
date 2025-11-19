@@ -320,3 +320,21 @@ def update_model_comparison(dummy):
             text=f'Erro ao gerar comparação: {str(e)}',
             showarrow=False
         )
+
+
+def register_callbacks(app):
+    """Register tuning callbacks with the app.
+    
+    Note: Callbacks are registered using @callback decorator,
+    so this function is just a placeholder for consistency.
+    """
+    pass
+
+
+def register_callbacks(app):
+    """Register tuning callbacks with the app.
+    
+    Note: Callbacks are registered using @callback decorator,
+    so this function is just a placeholder for consistency.
+    """
+    pass

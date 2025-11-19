@@ -34,6 +34,7 @@ class DiagnosisClassifier:
         self.shap_data = None
         self.shap_explainer = None  # Armazena o explainer SHAP
         self.best_params = None  # Armazena melhores parâmetros do tuning
+        self.smote_comparison_results = None  # Armazena comparação Base vs SMOTE
 
     def prepare_data(
         self,
@@ -441,7 +442,10 @@ class DiagnosisClassifier:
         df_smote = self.compare_models(X_train, X_test, y_train, y_test, use_smote=True)
         df_smote['Versão'] = 'Com SMOTE'
         
-        return {'base': df_base, 'smote': df_smote}
+        # Store results for dashboard use
+        self.smote_comparison_results = {'base': df_base, 'smote': df_smote}
+        
+        return self.smote_comparison_results
 
     def save_model(self, filepath: str) -> None:
         payload = {
@@ -455,6 +459,7 @@ class DiagnosisClassifier:
             'shap_data': self.shap_data,
             'shap_explainer': None,  # Explainer não é serializável, recalcular se necessário
             'best_params': self.best_params,
+            'smote_comparison_results': self.smote_comparison_results,
         }
         joblib.dump(payload, filepath)
         logger.info(f"Modelo salvo em: {filepath}")
@@ -471,4 +476,30 @@ class DiagnosisClassifier:
         self.shap_data = payload.get('shap_data')
         self.shap_explainer = None  # Será recriado se necessário
         self.best_params = payload.get('best_params')
+        self.smote_comparison_results = payload.get('smote_comparison_results')
         logger.info(f"Modelo carregado de: {filepath}")
+
+        def explain_prediction(self, X_instance: np.ndarray, top_n: int = 5) -> list:
+            if self.model is None:
+                raise RuntimeError("Modelo não treinado.")
+        explainer = shap.TreeExplainer(self.model)
+        shap_values = explainer.shap_values(X_instance)
+        prediction_idx = self.model.predict(X_instance)[0]
+        class_shap_values = shap_values[prediction_idx][0] if isinstance(shap_values, list) else shap_values[0]
+
+        explanations = []
+        feature_names = self.feature_names if self.feature_names else [f"Feature {i}" for i in range(len(class_shap_values))]
+
+        for name, value, input_val in zip(feature_names, class_shap_values, X_instance[0]):
+            # Filtra features com impacto zero (irrelevantes para este caso)
+            if abs(value) > 0.01: 
+                explanations.append({
+                    "feature": name,
+                    "impact": float(value), # Valor SHAP (+ aumenta risco, - diminui)
+                    "value": float(input_val) # O valor que o usuário inseriu (ex: 38.5 graus)
+                })
+
+        # Ordena pelo impacto absoluto (as mais importantes primeiro)
+        explanations.sort(key=lambda x: abs(x['impact']), reverse=True)
+        
+        return explanations[:top_n]

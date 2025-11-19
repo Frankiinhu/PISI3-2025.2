@@ -474,3 +474,12 @@ def update_model_metrics(sample_idx):
         ], style={'marginTop': '20px'}))
     
     return children
+
+
+def register_callbacks(app):
+    """Register classification callbacks with the app.
+    
+    Note: Callbacks are registered using @callback decorator,
+    so this function is just a placeholder for consistency.
+    """   
+    pass
