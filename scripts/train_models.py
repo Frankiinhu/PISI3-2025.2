@@ -111,10 +111,11 @@ def train_classifier(data_path: Path | str, save_path: Path | str, use_smote: bo
 
     logger.info("\n🔍 Calculando SHAP values...")
     try:
-        classifier.calculate_shap_values(X_test, max_samples=100)
+        classifier.calculate_shap_values(X_test, max_samples=50)  # Reduzido para 50 amostras
         logger.info("  ✓ SHAP values calculados e salvos com o modelo")
     except Exception as e:
         logger.warning(f"  ⚠️  Erro ao calcular SHAP values: {e}")
+        logger.warning("  Continuando sem SHAP values...")
 
     classifier.metrics = metrics
 

@@ -61,22 +61,32 @@ def load_data_context() -> DataContext:
 
     # Tentar carregar do diretório models/ na raiz do projeto (onde train_models.py salva)
     try:
-        classifier_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'classifier.joblib')
+        # Tentar primeiro em models/saved_models/classifier.joblib
+        classifier_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'saved_models', 'classifier.joblib')
+        if not os.path.exists(classifier_path):
+            # Se não encontrar, tentar em models/classifier.joblib
+            classifier_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'classifier.joblib')
+        
         if os.path.exists(classifier_path):
             classifier.load_model(classifier_path)
             print(f"✓ Classificador carregado de: {classifier_path}")
         else:
-            print(f"⚠ Arquivo não encontrado: {classifier_path}")
+            print(f"⚠ Arquivo não encontrado em: {classifier_path}")
     except Exception as exc:
         print(f"⚠ Erro ao carregar classificador: {exc}")
 
     try:
-        clusterer_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'clusterer.joblib')
+        # Tentar primeiro em models/saved_models/clusterer.joblib
+        clusterer_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'saved_models', 'clusterer.joblib')
+        if not os.path.exists(clusterer_path):
+            # Se não encontrar, tentar em models/clusterer.joblib
+            clusterer_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'clusterer.joblib')
+        
         if os.path.exists(clusterer_path):
             clusterer.load_model(clusterer_path)
             print(f"✓ Clusterizador carregado de: {clusterer_path}")
         else:
-            print(f"⚠ Arquivo não encontrado: {clusterer_path}")
+            print(f"⚠ Arquivo não encontrado em: {clusterer_path}")
     except Exception as exc:
         print(f"⚠ Erro ao carregar clusterizador: {exc}")
 

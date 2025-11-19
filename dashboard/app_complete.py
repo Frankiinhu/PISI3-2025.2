@@ -153,7 +153,7 @@ def _prepare_climate_clusters(k: int) -> tuple[pd.DataFrame, list[str]]:
     return plot_df, climate_vars
 
 from dashboard.core.theme import COLORS, INDEX_STRING, metrics_unavailable_figure
-from dashboard.views import eda, overview
+from dashboard.views import eda, overview, classification, tuning
 
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
@@ -290,6 +290,44 @@ app.layout = html.Div(style={
                         'borderBottom': 'none',
                         'borderRadius': '8px 8px 0 0'
                     }),
+            dcc.Tab(label='🤖 Classificação & SHAP', value='tab-classification', 
+                    style={
+                        'color': COLORS['text_secondary'], 
+                        'backgroundColor': 'transparent',
+                        'border': 'none',
+                        'padding': '15px 30px',
+                        'fontSize': '1em',
+                        'fontWeight': '500'
+                    },
+                    selected_style={
+                        'color': COLORS['accent'], 
+                        'backgroundColor': COLORS['card'], 
+                        'fontWeight': '600',
+                        'borderTop': f'3px solid {COLORS["accent"]}',
+                        'borderLeft': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderRadius': '8px 8px 0 0'
+                    }),
+            dcc.Tab(label='🔧 Tuning & Otimização', value='tab-tuning', 
+                    style={
+                        'color': COLORS['text_secondary'], 
+                        'backgroundColor': 'transparent',
+                        'border': 'none',
+                        'padding': '15px 30px',
+                        'fontSize': '1em',
+                        'fontWeight': '500'
+                    },
+                    selected_style={
+                        'color': COLORS['accent'], 
+                        'backgroundColor': COLORS['card'], 
+                        'fontWeight': '600',
+                        'borderTop': f'3px solid {COLORS["accent"]}',
+                        'borderLeft': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderRadius': '8px 8px 0 0'
+                    }),
         ]),
         
         # Conteúdo das tabs
@@ -310,6 +348,10 @@ def render_content(tab):
         return create_ml_layout()
     elif tab == 'tab-pipeline':
         return create_pipeline_layout()
+    elif tab == 'tab-classification':
+        return classification.create_layout()
+    elif tab == 'tab-tuning':
+        return tuning.create_layout()
 
 
 overview.register_callbacks(app)

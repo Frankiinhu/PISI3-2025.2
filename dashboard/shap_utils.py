@@ -166,7 +166,8 @@ def create_shap_beeswarm(
     shap_data: np.ndarray,
     feature_names: List[str],
     top_n: int = 15,
-    title: str = "SHAP Beeswarm Plot"
+    title: str = "SHAP Beeswarm Plot",
+    include_features: Optional[List[str]] = None,
 ) -> go.Figure:
     """
     Cria beeswarm plot mostrando distribuição dos SHAP values.
@@ -192,8 +193,20 @@ def create_shap_beeswarm(
             else:
                 mean_abs_shap = np.abs(shap_values).mean(axis=0)
         
-        # Top features
-        top_indices = np.argsort(mean_abs_shap)[-top_n:]
+        # Se for fornecida uma lista de features para incluir, respeitar essa ordem
+        if include_features:
+            top_indices = []
+            for fname in include_features:
+                if fname in feature_names:
+                    top_indices.append(feature_names.index(fname))
+                else:
+                    logger.warning(f"Feature solicitada para beeswarm não encontrada: {fname}")
+            if len(top_indices) == 0:
+                # fallback para comportamento padrão
+                top_indices = np.argsort(mean_abs_shap)[-top_n:]
+        else:
+            # Top features por importância média
+            top_indices = np.argsort(mean_abs_shap)[-top_n:]
         
         fig = go.Figure()
         
