@@ -18,7 +18,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def train_classifier(data_path: Path | str, save_path: Path | str, use_smote: bool = False):
+def train_classifier(data_path: Path | str, save_path: Path | str, use_smote: bool = False, 
+                    tune_hyperparams: bool = False, search_type: str = 'random'):
     """
     Treina modelo de classificação
     
@@ -26,6 +27,8 @@ def train_classifier(data_path: Path | str, save_path: Path | str, use_smote: bo
         data_path: Caminho para o dataset
         save_path: Caminho para salvar o modelo
         use_smote: Se True, aplica SMOTE para balanceamento de classes
+        tune_hyperparams: Se True, realiza tuning de hiperparâmetros
+        search_type: 'grid' ou 'random' para tipo de busca
     """
     logger.info("=" * 50)
     logger.info("TREINAMENTO DO CLASSIFICADOR")
@@ -33,6 +36,8 @@ def train_classifier(data_path: Path | str, save_path: Path | str, use_smote: bo
         logger.info("⚖️  MODO: COM SMOTE (Balanceamento de Classes)")
     else:
         logger.info("📊 MODO: BASE (Sem Balanceamento)")
+    if tune_hyperparams:
+        logger.info(f"🔍 TUNING: {search_type.upper()}SearchCV Ativado")
     logger.info("=" * 50)
 
     data_path = Path(data_path)
@@ -47,18 +52,30 @@ def train_classifier(data_path: Path | str, save_path: Path | str, use_smote: bo
     logger.info("Preparando dados para treinamento...")
     X_train, X_test, y_train, y_test = classifier.prepare_data(df, test_size=0.2)
 
+    # Aplicar SMOTE se solicitado
     if use_smote:
-        logger.info("Treinando Random Forest com SMOTE...")
-        classifier.train_with_smote(
+        from imblearn.over_sampling import SMOTE
+        logger.info("Aplicando SMOTE...")
+        smote = SMOTE(random_state=42)
+        X_train, y_train = smote.fit_resample(X_train, y_train)
+        logger.info(f"Dataset balanceado: {len(y_train)} amostras")
+
+    # Treinar com ou sem tuning
+    if tune_hyperparams:
+        logger.info(f"Iniciando tuning de hiperparâmetros ({search_type})...")
+        tuning_results = classifier.tune_hyperparameters(
             X_train, y_train,
             model_type='random_forest',
-            n_estimators=200,
-            max_depth=20,
-            min_samples_split=5,
-            min_samples_leaf=2
+            search_type=search_type,
+            cv=5,
+            n_iter=20 if search_type == 'random' else None,
+            verbose=1
         )
+        logger.info(f"\n🏆 Melhores Parâmetros Encontrados:")
+        for param, value in tuning_results['best_params'].items():
+            logger.info(f"   {param}: {value}")
     else:
-        logger.info("Treinando Random Forest...")
+        logger.info("Treinando Random Forest com parâmetros padrão...")
         classifier.train_random_forest(
             X_train, y_train,
             n_estimators=200,
@@ -167,21 +184,30 @@ def train_clusterer(data_path: Path | str, save_path: Path | str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Treinar modelos de classificação e clusterização.")
-    parser.add_argument('--data', required=True, help='Caminho para o dataset (CSV ou fonte esperada pelo DataLoader)')
+    parser = argparse.ArgumentParser(description="Treinar modelos de classificação e clusterização com suporte a tuning e SHAP.")
+    parser.add_argument('--data', required=True, help='Caminho para o dataset CSV')
     parser.add_argument('--out-dir', default='models', help='Diretório para salvar os modelos')
     parser.add_argument('--classifier-name', default='classifier.joblib')
     parser.add_argument('--clusterer-name', default='clusterer.joblib')
     parser.add_argument('--skip-classifier', action='store_true', help='Pular treinamento do classificador')
     parser.add_argument('--skip-clusterer', action='store_true', help='Pular treinamento do clusterizador')
-    parser.add_argument('--use-smote', action='store_true', help='Aplicar SMOTE para balanceamento de classes no classificador')
+    parser.add_argument('--use-smote', action='store_true', help='Aplicar SMOTE para balanceamento de classes')
+    parser.add_argument('--tune-hyperparams', action='store_true', help='Realizar tuning de hiperparâmetros (GridSearch/RandomSearch)')
+    parser.add_argument('--search-type', default='random', choices=['grid', 'random'], 
+                       help='Tipo de busca: "grid" para GridSearchCV ou "random" para RandomizedSearchCV (padrão: random)')
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not args.skip_classifier:
-        train_classifier(args.data, out_dir / args.classifier_name, use_smote=args.use_smote)
+        train_classifier(
+            args.data, 
+            out_dir / args.classifier_name, 
+            use_smote=args.use_smote,
+            tune_hyperparams=args.tune_hyperparams,
+            search_type=args.search_type
+        )
 
     if not args.skip_clusterer:
         train_clusterer(args.data, out_dir / args.clusterer_name)

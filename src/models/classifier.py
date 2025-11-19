@@ -11,7 +11,7 @@ from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score, f1_score, 
                              precision_score, recall_score)
-from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
 from imblearn.over_sampling import SMOTE
@@ -32,6 +32,8 @@ class DiagnosisClassifier:
         self.metrics: Dict[str, float] | None = None
         self.shap_values = None
         self.shap_data = None
+        self.shap_explainer = None  # Armazena o explainer SHAP
+        self.best_params = None  # Armazena melhores parâmetros do tuning
 
     def prepare_data(
         self,
@@ -200,43 +202,221 @@ class DiagnosisClassifier:
         else:
             raise ValueError(f"model_type '{model_type}' não suportado.")
 
+    def tune_hyperparameters(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        model_type: str = 'random_forest',
+        search_type: str = 'random',
+        cv: int = 5,
+        n_iter: int = 20,
+        n_jobs: int = -1,
+        verbose: int = 2
+    ) -> Dict[str, Any]:
+        """
+        Realiza tuning de hiperparâmetros usando GridSearchCV ou RandomizedSearchCV.
+        
+        Args:
+            X_train: Features de treino
+            y_train: Labels de treino
+            model_type: 'random_forest' ou 'gradient_boosting'
+            search_type: 'grid' para GridSearchCV ou 'random' para RandomizedSearchCV
+            cv: Número de folds para validação cruzada
+            n_iter: Número de iterações para RandomizedSearchCV
+            n_jobs: Número de jobs paralelos (-1 usa todos os cores)
+            verbose: Nível de verbosidade (0, 1, 2)
+            
+        Returns:
+            Dict com melhores parâmetros e score
+        """
+        logger.info("🔍 Iniciando tuning de hiperparâmetros...")
+        logger.info(f"   Método: {search_type.upper()}SearchCV")
+        logger.info(f"   Modelo: {model_type}")
+        logger.info(f"   Validação Cruzada: {cv}-fold")
+        
+        # Definir espaços de busca para cada modelo
+        if model_type == 'random_forest':
+            param_distributions = {
+                'n_estimators': [100, 200, 300, 500],
+                'max_depth': [10, 20, 30, None],
+                'min_samples_split': [2, 5, 10],
+                'min_samples_leaf': [1, 2, 4],
+                'max_features': ['sqrt', 'log2', None],
+                'bootstrap': [True, False],
+                'class_weight': ['balanced', 'balanced_subsample', None]
+            }
+            base_estimator = RandomForestClassifier(random_state=self.random_state, n_jobs=n_jobs)
+            
+        elif model_type == 'gradient_boosting':
+            param_distributions = {
+                'n_estimators': [100, 200, 300],
+                'learning_rate': [0.01, 0.05, 0.1, 0.2],
+                'max_depth': [3, 5, 7, 9],
+                'min_samples_split': [2, 5, 10],
+                'min_samples_leaf': [1, 2, 4],
+                'subsample': [0.8, 0.9, 1.0],
+                'max_features': ['sqrt', 'log2', None]
+            }
+            base_estimator = GradientBoostingClassifier(random_state=self.random_state)
+        else:
+            raise ValueError(f"model_type '{model_type}' não suportado. Use 'random_forest' ou 'gradient_boosting'.")
+        
+        # Escolher tipo de busca
+        if search_type == 'grid':
+            logger.info(f"   Combinações possíveis: ~{np.prod([len(v) for v in param_distributions.values()])}")
+            search = GridSearchCV(
+                estimator=base_estimator,
+                param_grid=param_distributions,
+                cv=cv,
+                scoring='balanced_accuracy',
+                n_jobs=n_jobs,
+                verbose=verbose,
+                return_train_score=True
+            )
+        elif search_type == 'random':
+            logger.info(f"   Iterações: {n_iter}")
+            search = RandomizedSearchCV(
+                estimator=base_estimator,
+                param_distributions=param_distributions,
+                n_iter=n_iter,
+                cv=cv,
+                scoring='balanced_accuracy',
+                n_jobs=n_jobs,
+                verbose=verbose,
+                random_state=self.random_state,
+                return_train_score=True
+            )
+        else:
+            raise ValueError(f"search_type '{search_type}' inválido. Use 'grid' ou 'random'.")
+        
+        # Executar busca
+        logger.info("⏳ Iniciando busca (isso pode demorar alguns minutos)...")
+        search.fit(X_train, y_train)
+        
+        # Armazenar resultados
+        self.model = search.best_estimator_
+        self.best_params = search.best_params_
+        
+        logger.info("✅ Tuning concluído!")
+        logger.info(f"   Best CV Score: {search.best_score_:.4f}")
+        logger.info(f"   Melhores parâmetros:")
+        for param, value in search.best_params_.items():
+            logger.info(f"      {param}: {value}")
+        
+        return {
+            'best_params': search.best_params_,
+            'best_score': float(search.best_score_),
+            'best_estimator': search.best_estimator_,
+            'cv_results': search.cv_results_
+        }
+
     def calculate_shap_values(self, X_sample: np.ndarray, max_samples: int = 100) -> None:
         """
-        Calcula SHAP values para o modelo treinado.
+        Calcula SHAP values para explicabilidade do modelo.
+        Suporta feature importance, beeswarm plots, e force plots.
         
         Args:
             X_sample: Amostra de dados para calcular SHAP values (já escalonada)
-            max_samples: Número máximo de amostras para usar no cálculo
+            max_samples: Número máximo de amostras (padrão: 100 para performance)
         """
         if self.model is None:
-            raise RuntimeError("Modelo não treinado.")
+            raise RuntimeError("Modelo não treinado. Execute train_*() primeiro.")
         
         try:
-            import shap  # type: ignore
+            import shap
             
-            # Limitar número de amostras para performance
+            # Limitar amostras para performance
             if len(X_sample) > max_samples:
+                logger.info(f"📊 Amostrando {max_samples} de {len(X_sample)} registros para SHAP...")
                 indices = np.random.choice(len(X_sample), max_samples, replace=False)
-                X_sample = X_sample[indices]
-            
-            # TreeExplainer para modelos baseados em árvores (Random Forest, Gradient Boosting)
-            if hasattr(self.model, 'estimators_'):
-                logger.info("Calculando SHAP values com TreeExplainer...")
-                explainer = shap.TreeExplainer(self.model)
-                self.shap_values = explainer.shap_values(X_sample)
-                self.shap_data = X_sample
-                logger.info(f"SHAP values calculados para {len(X_sample)} amostras.")
+                X_sample_reduced = X_sample[indices]
             else:
-                logger.warning("Modelo não suporta TreeExplainer. Use modelos baseados em árvores.")
+                X_sample_reduced = X_sample
+                logger.info(f"📊 Usando todas as {len(X_sample)} amostras para SHAP...")
+            
+            # Verificar se é modelo baseado em árvores
+            if hasattr(self.model, 'estimators_'):
+                logger.info("🌳 Usando TreeExplainer (otimizado para Random Forest/Gradient Boosting)...")
+                explainer = shap.TreeExplainer(self.model)
+                self.shap_explainer = explainer
+                
+                # Calcular SHAP values
+                logger.info("⏳ Calculando SHAP values (pode demorar um pouco)...")
+                self.shap_values = explainer.shap_values(X_sample_reduced)
+                self.shap_data = X_sample_reduced
+                
+                # Verificar formato dos SHAP values
+                if isinstance(self.shap_values, list):
+                    n_classes = len(self.shap_values)
+                    n_samples = self.shap_values[0].shape[0]
+                    n_features = self.shap_values[0].shape[1]
+                    logger.info(f"✅ SHAP values calculados:")
+                    logger.info(f"   - {n_classes} classes")
+                    logger.info(f"   - {n_samples} amostras")
+                    logger.info(f"   - {n_features} features")
+                elif isinstance(self.shap_values, np.ndarray):
+                    logger.info(f"✅ SHAP values calculados: shape {self.shap_values.shape}")
+                
+                logger.info("📈 Pronto para visualizações:")
+                logger.info("   ✓ Feature Importance (global)")
+                logger.info("   ✓ Beeswarm Plot (global)")
+                logger.info("   ✓ Bar Plot Multiclasse (global)")
+                logger.info("   ✓ Force Plot (local - individual)")
+                
+            else:
+                logger.warning("⚠️ Modelo não suporta TreeExplainer.")
+                logger.warning("   Use Random Forest ou Gradient Boosting para SHAP completo.")
+                self.shap_values = None
+                self.shap_data = None
+                self.shap_explainer = None
+                
         except ImportError:
-            logger.warning("Biblioteca 'shap' não instalada. SHAP values não serão calculados.")
-            logger.info("Para instalar: pip install shap")
+            logger.error("❌ Biblioteca 'shap' não encontrada!")
+            logger.info("📦 Instale com: pip install shap")
             self.shap_values = None
             self.shap_data = None
+            self.shap_explainer = None
         except Exception as e:
-            logger.error(f"Erro ao calcular SHAP values: {e}")
+            logger.error(f"❌ Erro ao calcular SHAP values: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             self.shap_values = None
             self.shap_data = None
+            self.shap_explainer = None
+    
+    def get_shap_feature_importance(self, top_n: int = 15) -> pd.DataFrame:
+        """
+        Retorna feature importance baseado em SHAP values (média absoluta).
+        
+        Args:
+            top_n: Número de top features para retornar
+            
+        Returns:
+            DataFrame com features e importâncias
+        """
+        if self.shap_values is None or self.feature_names is None:
+            raise RuntimeError("SHAP values não calculados. Execute calculate_shap_values() primeiro.")
+        
+        # Para multiclasse, pegar média entre classes
+        if isinstance(self.shap_values, list):
+            # Lista de arrays (uma por classe)
+            mean_abs_shap = np.mean([np.abs(sv).mean(axis=0) for sv in self.shap_values], axis=0)
+        else:
+            # Array único ou 3D
+            if len(self.shap_values.shape) == 3:
+                # (samples, features, classes)
+                mean_abs_shap = np.abs(self.shap_values).mean(axis=(0, 2))
+            else:
+                # (samples, features)
+                mean_abs_shap = np.abs(self.shap_values).mean(axis=0)
+        
+        # Criar DataFrame
+        importance_df = pd.DataFrame({
+            'feature': self.feature_names,
+            'importance': mean_abs_shap
+        }).sort_values('importance', ascending=False).head(top_n)
+        
+        return importance_df
 
     def compare_with_without_smote(
         self,
@@ -273,6 +453,8 @@ class DiagnosisClassifier:
             'random_state': self.random_state,
             'shap_values': self.shap_values,
             'shap_data': self.shap_data,
+            'shap_explainer': None,  # Explainer não é serializável, recalcular se necessário
+            'best_params': self.best_params,
         }
         joblib.dump(payload, filepath)
         logger.info(f"Modelo salvo em: {filepath}")
@@ -287,4 +469,6 @@ class DiagnosisClassifier:
         self.random_state = payload.get('random_state', self.random_state)
         self.shap_values = payload.get('shap_values')
         self.shap_data = payload.get('shap_data')
+        self.shap_explainer = None  # Será recriado se necessário
+        self.best_params = payload.get('best_params')
         logger.info(f"Modelo carregado de: {filepath}")
