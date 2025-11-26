@@ -587,4 +587,59 @@ def apply_plotly_template(fig: go.Figure, height: int = 500, show_legend: bool =
     return fig
 
 
-__all__ = ['COLORS', 'INDEX_STRING', 'metrics_unavailable_figure', 'page_header', 'apply_plotly_template']
+def error_figure(message: str, height: int = 400) -> go.Figure:
+    """Create error/empty placeholder figure with message."""
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref='paper',
+        yref='paper',
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font=dict(size=14, color=COLORS['text_secondary'], family='Inter, sans-serif')
+    )
+    fig.update_layout(
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        height=height,
+        xaxis=dict(showgrid=False, showticklabels=False),
+        yaxis=dict(showgrid=False, showticklabels=False),
+        margin=dict(t=40, b=40, l=40, r=40)
+    )
+    return fig
+
+def _tab_style():
+    """Return default tab style."""
+    return {
+        'color': COLORS['text_secondary'], 
+        'backgroundColor': 'transparent',
+        'border': 'none',
+        'padding': '15px 30px',
+        'fontSize': '1em',
+        'fontWeight': '500',
+        'transition': 'all 0.3s ease'
+    }
+
+def _tab_selected_style():
+    """Return selected tab style."""
+    return {
+        'color': COLORS['accent'], 
+        'backgroundColor': COLORS['card'], 
+        'fontWeight': '600',
+        'borderTop': f'3px solid {COLORS["accent"]}',
+        'borderLeft': 'none',
+        'borderRight': 'none',
+        'borderBottom': 'none',
+        'borderRadius': '8px 8px 0 0'
+    }
+
+
+__all__ = [
+    'COLORS', 
+    'INDEX_STRING', 
+    'metrics_unavailable_figure', 
+    'page_header', 
+    'apply_plotly_template', 
+    'error_figure'
+]

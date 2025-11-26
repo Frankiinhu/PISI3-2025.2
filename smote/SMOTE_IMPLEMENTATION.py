@@ -26,7 +26,7 @@ from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.metrics import classification_report_imbalanced
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data_processing.data_loader import DataLoader
 
@@ -364,7 +364,7 @@ class SMOTEAnalyzer:
 def main():
     """Main execution function"""
     # Path to dataset
-    data_path = Path(__file__).parent / "data" / "DATASET FINAL WRDP.csv"
+    data_path = Path(__file__).parent.parent / "data" / "DATASET FINAL WRDP.csv"
     
     if not data_path.exists():
         print(f"Error: Dataset not found at {data_path}")

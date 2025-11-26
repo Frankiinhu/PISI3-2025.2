@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import os
 import sys
+import logging
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Ensure src package is discoverable when this module is imported standalone.
 _SYS_INSERTED = False
@@ -44,7 +47,7 @@ def load_data_context() -> DataContext:
     if _context is not None:
         return _context
 
-    print("Carregando dados...")
+    logger.info("Carregando dados...")
     data_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'DATASET FINAL WRDP.csv')
     loader = DataLoader(data_path)
     df_global = loader.get_clean_data()
@@ -55,7 +58,7 @@ def load_data_context() -> DataContext:
     diagnosis_cols = feature_dict.get('diagnosis', []) or [feature_dict.get('target', 'Diagnóstico')]
     climatic_vars = feature_dict.get('climatic', [])
 
-    print("Carregando modelos...")
+    logger.info("Carregando modelos...")
     classifier = DiagnosisClassifier()
     clusterer = DiseaseClusterer()
 
@@ -69,11 +72,11 @@ def load_data_context() -> DataContext:
         
         if os.path.exists(classifier_path):
             classifier.load_model(classifier_path)
-            print(f"✓ Classificador carregado de: {classifier_path}")
+            logger.info(f"Classificador carregado de: {classifier_path}")
         else:
-            print(f"⚠ Arquivo não encontrado em: {classifier_path}")
+            logger.warning(f"Arquivo não encontrado em: {classifier_path}")
     except Exception as exc:
-        print(f"⚠ Erro ao carregar classificador: {exc}")
+        logger.warning(f"Erro ao carregar classificador: {exc}")
 
     try:
         # Tentar primeiro em models/saved_models/clusterer.joblib
@@ -84,11 +87,11 @@ def load_data_context() -> DataContext:
         
         if os.path.exists(clusterer_path):
             clusterer.load_model(clusterer_path)
-            print(f"✓ Clusterizador carregado de: {clusterer_path}")
+            logger.info(f"Clusterizador carregado de: {clusterer_path}")
         else:
-            print(f"⚠ Arquivo não encontrado em: {clusterer_path}")
+            logger.warning(f"Arquivo não encontrado em: {clusterer_path}")
     except Exception as exc:
-        print(f"⚠ Erro ao carregar clusterizador: {exc}")
+        logger.warning(f"Erro ao carregar clusterizador: {exc}")
 
     _context = DataContext(
         df=df_global,
