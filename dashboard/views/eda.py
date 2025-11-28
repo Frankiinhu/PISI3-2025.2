@@ -9,6 +9,7 @@ from dash import Input, Output, dcc, html
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import dash_bootstrap_components as dbc
 
 from ..components import create_card
 from ..core.data_context import get_context, has_feature_importances, is_classifier_available
@@ -68,6 +69,16 @@ def create_layout() -> html.Div:
     clean_symptoms = [s for s in ctx.symptom_cols if 'HIV' not in s.upper() and 'AIDS' not in s.upper()]
     symptom_options = [{'label': s, 'value': s} for s in clean_symptoms][:20]
     default_symptoms = [opt['value'] for opt in symptom_options][:4]
+    
+    return dcc.Loading(
+        id="loading-eda",
+        type="cube",
+        color=COLORS['primary'],
+        children=_create_eda_content(ctx, clean_symptoms, symptom_options, default_symptoms)
+    )
+
+
+def _create_eda_content(ctx, clean_symptoms, symptom_options, default_symptoms) -> html.Div:
 
     climate_filter_options = [
         (

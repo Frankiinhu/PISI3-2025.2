@@ -41,6 +41,16 @@ def _section_header(title: str, subtitle: str | None = None, accent: str = 'acce
 
 def create_layout() -> html.Div:
     """Create merged pipeline and tuning tab layout."""
+    return dcc.Loading(
+        id="loading-pipeline-tuning",
+        type="cube",
+        color=COLORS['primary'],
+        children=_create_pipeline_content()
+    )
+
+
+def _create_pipeline_content() -> html.Div:
+    """Create the actual pipeline content."""
     return html.Div([
         page_header(
             '🔧 Pipeline de Treinamento & Tuning',
@@ -115,9 +125,12 @@ def create_layout() -> html.Div:
                 dcc.Graph(id='pipeline-model-comparison', config={'displayModeBar': False})
             ], '📈 Acurácia Balanceada dos 4 Modelos'),
             
-            create_card([
-                dcc.Graph(id='pipeline-model-comparison-table', config={'displayModeBar': False})
-            ], '📋 Tabela Detalhada de Métricas', style={'marginTop': '20px'})
+            html.Div(
+                create_card([
+                    dcc.Graph(id='pipeline-model-comparison-table', config={'displayModeBar': False})
+                ], '📋 Tabela Detalhada de Métricas'),
+                style={'marginTop': '20px'}
+            )
         ], style={'marginBottom': '20px'}),
     ])
 

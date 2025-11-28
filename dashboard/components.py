@@ -1,4 +1,4 @@
-"""Reusable UI components for the NimbusVita dashboard."""
+"""Create card function for consistent styled containers."""
 from __future__ import annotations
 
 from dash import html
@@ -24,15 +24,17 @@ def create_card(children, title: str | None = None, gradient: bool = False, glas
             }),
             html.H3(title, style={
                 'color': COLORS['text'],
-                'marginBottom': '14px',
-                'marginTop': '8px',
+                'marginBottom': '10px',
+                'marginTop': '10px',
                 'fontSize': '1.25em',
                 'fontWeight': '700',
+                'paddingTop': '12px',
                 'paddingBottom': '12px',
                 'borderBottom': f'2px solid {COLORS["border"]}',
                 'display': 'flex',
                 'alignItems': 'center',
                 'gap': '10px',
+                'textAlign': 'center',
             })
         ], style={'position': 'relative'}))
 

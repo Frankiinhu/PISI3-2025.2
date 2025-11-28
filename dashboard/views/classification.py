@@ -69,7 +69,17 @@ def _graph_card(graph_id: str, title: str, flex: str = '1 1 360px') -> html.Div:
 
 
 def create_layout() -> html.Div:
-    """Create classification and SHAP explainability tab layout."""
+    """Create classification and SHAP analysis tab layout."""
+    return dcc.Loading(
+        id="loading-classification",
+        type="cube",
+        color=COLORS['primary'],
+        children=_create_classification_content()
+    )
+
+
+def _create_classification_content() -> html.Div:
+    """Create the actual classification content."""
     ctx = get_context()
     classifier_available = is_classifier_available()
     

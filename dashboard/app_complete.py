@@ -120,13 +120,13 @@ def serve_layout():
                 dcc.Tab(label='Análise Exploratória', value='tab-eda', 
                         style=_tab_style(),
                         selected_style=_tab_selected_style()),
-                dcc.Tab(label='Modelos ML', value='tab-ml', 
+                dcc.Tab(label='Classificação & SHAP', value='tab-classification', 
                         style=_tab_style(),
                         selected_style=_tab_selected_style()),
-                dcc.Tab(label='🔧 Pipeline & Tuning', value='tab-pipeline-tuning', 
+                dcc.Tab(label='Clusterização', value='tab-clustering', 
                         style=_tab_style(),
                         selected_style=_tab_selected_style()),
-                dcc.Tab(label='🤖 Classificação & SHAP', value='tab-classification', 
+                dcc.Tab(label='Pipeline & Tuning', value='tab-pipeline-tuning', 
                         style=_tab_style(),
                         selected_style=_tab_selected_style()),
             ]),
@@ -191,12 +191,12 @@ def render_content(tab):
         return overview.create_layout()
     elif tab == 'tab-eda':
         return eda.create_layout()
-    elif tab == 'tab-ml':
+    elif tab == 'tab-classification':
+        return classification.create_layout()
+    elif tab == 'tab-clustering':
         return ml_clustering.create_layout()
     elif tab == 'tab-pipeline-tuning':
         return pipeline_tuning.create_layout()
-    elif tab == 'tab-classification':
-        return classification.create_layout()
     return html.Div('Tab não implementada')
 
 
@@ -207,8 +207,8 @@ def render_content(tab):
 overview.register_callbacks(app)
 eda.register_callbacks(app)
 classification.register_callbacks(app)
-pipeline_tuning.register_callbacks(app)
 ml_clustering.register_callbacks(app)
+pipeline_tuning.register_callbacks(app)
 
 
 # =====================================================================

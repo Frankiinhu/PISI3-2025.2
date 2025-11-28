@@ -140,6 +140,16 @@ def _prepare_climate_clusters(k: int) -> tuple[pd.DataFrame, list[str]]:
 
 def create_layout() -> html.Div:
     """Create ML Clustering tab layout."""
+    return dcc.Loading(
+        id="loading-ml-clustering",
+        type="cube",
+        color=COLORS['primary'],
+        children=_create_clustering_content()
+    )
+
+
+def _create_clustering_content() -> html.Div:
+    """Create the actual clustering content."""
     ctx = get_context()
     
     # Check if clusterer is available
@@ -268,7 +278,7 @@ def create_layout() -> html.Div:
 )
 def update_cluster_summary(tab):
     """Update cluster model summary."""
-    if tab != 'tab-ml':
+    if tab != 'tab-clustering':
         return html.P('Aguardando carregamento...', style={'color': COLORS['text_secondary']})
     
     ctx = get_context()
@@ -327,7 +337,7 @@ def update_cluster_summary(tab):
 )
 def update_cluster_pca_3d(tab):
     """Update PCA 3D cluster visualization."""
-    if tab != 'tab-ml':
+    if tab != 'tab-clustering':
         return go.Figure()
     
     try:
@@ -397,7 +407,7 @@ def update_cluster_pca_3d(tab):
 )
 def update_climate_cluster_3d(tab, k):
     """Update climate-based 3D cluster visualization."""
-    if tab != 'tab-ml':
+    if tab != 'tab-clustering':
         return go.Figure()
     
     try:
@@ -452,7 +462,7 @@ def update_climate_cluster_3d(tab, k):
 )
 def update_cluster_diagnosis_stacked(tab):
     """Update diagnosis distribution by main cluster model."""
-    if tab != 'tab-ml':
+    if tab != 'tab-clustering':
         return go.Figure()
     
     try:
@@ -511,7 +521,7 @@ def update_cluster_diagnosis_stacked(tab):
 )
 def update_climate_cluster_diagnosis_stacked(tab, k):
     """Update diagnosis distribution by climate clusters."""
-    if tab != 'tab-ml':
+    if tab != 'tab-clustering':
         return go.Figure()
     
     try:

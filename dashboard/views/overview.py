@@ -61,6 +61,7 @@ def _kpi_card(icon: str, label: str, value: str, value_color: str, subtitle: str
                 'left': '0',
                 'right': '0',
                 'height': '4px',
+                'width': '100%',
                 'background': selected_gradient,
                 'borderRadius': '12px 12px 0 0',
             }),
@@ -177,6 +178,15 @@ def hex_to_rgb(hex_color):
 
 
 def create_layout() -> html.Div:
+    return dcc.Loading(
+        id="loading-overview",
+        type="cube",
+        color=COLORS['primary'],
+        children=_create_overview_content()
+    )
+
+
+def _create_overview_content() -> html.Div:
     ctx = get_context()
     info = ctx.eda.basic_info()
     diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
