@@ -12,7 +12,7 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, dcc, html
 
 from dashboard.core.theme import COLORS, INDEX_STRING
-from dashboard.views import eda, overview, classification, pipeline_tuning, ml_clustering
+from dashboard.views import eda, overview, classification, pipeline_tuning, ml_clustering, prognosis
 from dashboard.core.theme import _tab_style as theme_tab_style, _tab_selected_style as theme_tab_selected_style
 
 
@@ -79,32 +79,7 @@ def serve_layout():
                            'fontSize': '0.95em',
                            'fontWeight': '400'
                        })
-            ]),
-            # Theme toggle button
-            dbc.Button(
-                id='theme-toggle-btn',
-                className='theme-toggle-btn',
-                style={
-                    'position': 'absolute',
-                    'right': '30px',
-                    'top': '50%',
-                    'transform': 'translateY(-50%)',
-                    'width': '50px',
-                    'height': '50px',
-                    'borderRadius': '50%',
-                    'border': '2px solid rgba(255,255,255,0.3)',
-                    'backgroundColor': 'rgba(255,255,255,0.1)',
-                    'color': 'white',
-                    'fontSize': '1.3em',
-                    'cursor': 'pointer',
-                    'transition': 'all 0.3s ease',
-                    'display': 'flex',
-                    'alignItems': 'center',
-                    'justifyContent': 'center',
-                    'padding': '0'
-                },
-                children='🌙'
-            )
+            ])
         ]),
         
         # Container para tabs
@@ -124,6 +99,9 @@ def serve_layout():
                         style=_tab_style(),
                         selected_style=_tab_selected_style()),
                 dcc.Tab(label='Clusterização', value='tab-clustering', 
+                        style=_tab_style(),
+                        selected_style=_tab_selected_style()),
+                dcc.Tab(label='Prognóstico', value='tab-prognosis', 
                         style=_tab_style(),
                         selected_style=_tab_selected_style()),
                 dcc.Tab(label='Pipeline & Tuning', value='tab-pipeline-tuning', 
@@ -150,21 +128,6 @@ app.layout = serve_layout()
 # =====================================================================
 # CALLBACKS
 # =====================================================================
-
-@app.callback(
-    [Output('theme-toggle-btn', 'children'),
-     Output('theme-store', 'data')],
-    [Input('theme-toggle-btn', 'n_clicks')],
-    prevent_initial_call=False
-)
-def toggle_theme(n_clicks):
-    """Toggle theme between light and dark."""
-    if n_clicks is None or n_clicks % 2 == 0:
-        return '🌙', {'theme': 'dark'}
-    return '☀️', {'theme': 'light'}
-
-
-# Clientside callback to persist theme to localStorage
 app.clientside_callback(
     """
     function(data) {
@@ -195,6 +158,8 @@ def render_content(tab):
         return classification.create_layout()
     elif tab == 'tab-clustering':
         return ml_clustering.create_layout()
+    elif tab == 'tab-prognosis':
+        return prognosis.create_prognosis_tab()
     elif tab == 'tab-pipeline-tuning':
         return pipeline_tuning.create_layout()
     return html.Div('Tab não implementada')

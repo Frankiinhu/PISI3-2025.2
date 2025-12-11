@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from numpy import isnan
 
 # Adicionar src ao path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -127,16 +128,19 @@ def train_classifier(data_path: Path | str, save_path: Path | str, use_smote: bo
     return classifier, metrics
 
 
-def train_clusterer(data_path: Path | str, save_path: Path | str):
+def train_clusterer(data_path: Path | str, save_path: Path | str, use_kmodes: bool = True):
     """
     Treina modelo de clusterização
     
     Args:
         data_path: Caminho para o dataset
         save_path: Caminho para salvar o modelo
+        use_kmodes: Se True, usa K-Modes (melhor para dados categóricos/binários)
     """
     logger.info("\n" + "=" * 50)
     logger.info("TREINAMENTO DO CLUSTERIZADOR")
+    mode = 'kmodes' if use_kmodes else 'kmeans'
+    logger.info(f"🔬 MODO: {mode.upper()}")
     logger.info("=" * 50)
 
     data_path = Path(data_path)
@@ -146,37 +150,43 @@ def train_clusterer(data_path: Path | str, save_path: Path | str):
     loader = DataLoader(str(data_path))
     df = loader.get_clean_data()
 
-    clusterer = DiseaseClusterer(random_state=42)
+    clusterer = DiseaseClusterer(random_state=42, mode=mode)
 
-    logger.info("Preparando dados para clusterização...")
-    X_scaled = clusterer.prepare_data(df, exclude_cols=['Diagnóstico'])
+    logger.info(f"Preparando dados para clusterização ({mode})...")
+    X_prepared = clusterer.prepare_data(df, exclude_cols=['Diagnóstico'])
 
     logger.info("Encontrando número ótimo de clusters...")
-    optimal_results = clusterer.find_optimal_clusters(X_scaled, max_clusters=10)
+    optimal_results = clusterer.find_optimal_clusters(X_prepared, max_clusters=10)
 
     silhouette_best_k = optimal_results.get('silhouette_best_k')
     elbow_k = optimal_results.get('elbow_k')
 
     if silhouette_best_k is not None:
-        logger.info(f"Melhor número de clusters (silhouette): {silhouette_best_k}")
+        logger.info(f"✨ Melhor número de clusters (silhouette): {silhouette_best_k}")
     if elbow_k is not None and elbow_k != silhouette_best_k:
-        logger.info(f"Sugestão pelo método do cotovelo: {elbow_k}")
+        logger.info(f"📐 Sugestão pelo método do cotovelo: {elbow_k}")
 
     best_k = silhouette_best_k or elbow_k or 3
 
-    logger.info(f"Treinando K-Means com {best_k} clusters...")
-    clusterer.train_kmeans(X_scaled, n_clusters=best_k)
+    logger.info(f"Treinando {mode.upper()} com {best_k} clusters...")
+    clusterer.train(X_prepared, n_clusters=best_k)
 
     logger.info("Avaliando clusterização...")
-    metrics = clusterer.evaluate(X_scaled)
+    metrics = clusterer.evaluate(X_prepared)
 
-    logger.info("\nMétricas de Clusterização:")
+    logger.info("\n📊 Métricas de Clusterização:")
     logger.info(f"Número de Clusters: {metrics['n_clusters']}")
-    logger.info(f"Silhouette Score: {metrics['silhouette_score']:.4f}")
-    logger.info(f"Davies-Bouldin Score: {metrics['davies_bouldin_score']:.4f}")
-    logger.info(f"Calinski-Harabasz Score: {metrics['calinski_harabasz_score']:.4f}")
+    logger.info(f"Silhouette Score: {metrics.get('silhouette_score', 'N/A'):.4f}")
+    if 'davies_bouldin_score' in metrics and not isnan(metrics['davies_bouldin_score']):
+        logger.info(f"Davies-Bouldin Score: {metrics['davies_bouldin_score']:.4f}")
+    if 'calinski_harabasz_score' in metrics and not isnan(metrics['calinski_harabasz_score']):
+        logger.info(f"Calinski-Harabasz Score: {metrics['calinski_harabasz_score']:.4f}")
+    if 'cost' in metrics:
+        logger.info(f"Cost (K-Modes): {metrics['cost']:.2f}")
+    if 'inertia' in metrics:
+        logger.info(f"Inertia (K-Means): {metrics['inertia']:.2f}")
 
-    logger.info(f"\nSalvando modelo em: {save_path}")
+    logger.info(f"\n💾 Salvando modelo em: {save_path}")
     save_path.parent.mkdir(parents=True, exist_ok=True)
     clusterer.save_model(str(save_path))
 
@@ -196,6 +206,8 @@ def main():
     parser.add_argument('--tune-hyperparams', action='store_true', help='Realizar tuning de hiperparâmetros (GridSearch/RandomSearch)')
     parser.add_argument('--search-type', default='random', choices=['grid', 'random'], 
                        help='Tipo de busca: "grid" para GridSearchCV ou "random" para RandomizedSearchCV (padrão: random)')
+    parser.add_argument('--use-kmodes', action='store_true', default=True,
+                       help='Usar K-Modes para clusterização (melhor para dados categóricos/binários)')
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -211,7 +223,11 @@ def main():
         )
 
     if not args.skip_clusterer:
-        train_clusterer(args.data, out_dir / args.clusterer_name)
+        train_clusterer(
+            args.data, 
+            out_dir / args.clusterer_name,
+            use_kmodes=args.use_kmodes
+        )
 
 
 if __name__ == '__main__':

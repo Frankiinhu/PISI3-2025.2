@@ -71,12 +71,13 @@ def load_data_context() -> DataContext:
             classifier_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'classifier.joblib')
         
         if os.path.exists(classifier_path):
+            logger.info(f"Carregando classificador de: {classifier_path}")
             classifier.load_model(classifier_path)
-            logger.info(f"Classificador carregado de: {classifier_path}")
+            logger.info(f"Classificador carregado com sucesso. Modelo: {type(classifier.model).__name__ if classifier.model else 'None'}")
         else:
-            logger.warning(f"Arquivo não encontrado em: {classifier_path}")
+            logger.warning(f"Arquivo de classificador não encontrado em: {classifier_path}")
     except Exception as exc:
-        logger.warning(f"Erro ao carregar classificador: {exc}")
+        logger.error(f"Erro ao carregar classificador: {exc}", exc_info=True)
 
     try:
         # Tentar primeiro em models/saved_models/clusterer.joblib
@@ -86,12 +87,13 @@ def load_data_context() -> DataContext:
             clusterer_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'clusterer.joblib')
         
         if os.path.exists(clusterer_path):
+            logger.info(f"Carregando clusterizador de: {clusterer_path}")
             clusterer.load_model(clusterer_path)
-            logger.info(f"Clusterizador carregado de: {clusterer_path}")
+            logger.info(f"Clusterizador carregado com sucesso. Modo: {clusterer.mode}, Features: {len(clusterer.feature_names) if clusterer.feature_names else 0}")
         else:
-            logger.warning(f"Arquivo não encontrado em: {clusterer_path}")
+            logger.warning(f"Arquivo de clusterizador não encontrado em: {clusterer_path}")
     except Exception as exc:
-        logger.warning(f"Erro ao carregar clusterizador: {exc}")
+        logger.error(f"Erro ao carregar clusterizador: {exc}", exc_info=True)
 
     _context = DataContext(
         df=df_global,
@@ -133,14 +135,26 @@ def get_cluster_feature_frame() -> pd.DataFrame:
     if getattr(ctx.clusterer, 'feature_names', None) is None:
         raise ValueError('Clusterizador indisponível ou sem feature names; execute o treinamento e carregue o modelo salvo.')
 
-    numeric_df = ctx.df.select_dtypes(include=[np.number])
-    missing = [col for col in ctx.clusterer.feature_names if col not in numeric_df.columns]
-    if missing:
-        raise ValueError(
-            'Colunas ausentes no dataset atual para reconstruir os clusters: ' + ', '.join(missing)
-        )
-
-    return numeric_df.loc[:, ctx.clusterer.feature_names]
+    # Check if using K-Modes (can handle categorical) or K-Means (numeric only)
+    mode = getattr(ctx.clusterer, 'mode', 'kmeans')
+    
+    if mode == 'kmodes':
+        # K-Modes can use all features (categorical and numeric)
+        missing = [col for col in ctx.clusterer.feature_names if col not in ctx.df.columns]
+        if missing:
+            raise ValueError(
+                'Colunas ausentes no dataset atual para reconstruir os clusters: ' + ', '.join(missing)
+            )
+        return ctx.df.loc[:, ctx.clusterer.feature_names]
+    else:
+        # K-Means needs numeric features only
+        numeric_df = ctx.df.select_dtypes(include=[np.number])
+        missing = [col for col in ctx.clusterer.feature_names if col not in numeric_df.columns]
+        if missing:
+            raise ValueError(
+                'Colunas ausentes no dataset atual para reconstruir os clusters: ' + ', '.join(missing)
+            )
+        return numeric_df.loc[:, ctx.clusterer.feature_names]
 
 
 def get_cluster_features_and_labels() -> Tuple[pd.DataFrame, pd.Series]:

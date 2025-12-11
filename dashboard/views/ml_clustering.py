@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from typing import Tuple, Any, Literal
 from dash import Input, Output, dcc, html, callback
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_score
 import dash_bootstrap_components as dbc
 
 from ..components import create_card
@@ -17,26 +19,46 @@ from ..core.data_context import (
     get_context,
 )
 from ..core.theme import COLORS, page_header, error_figure
+from src.models.clustering import DiseaseClusterer
 
 
 # ==================== CACHE VARIABLES ====================
-_CACHED_ELBOW_K: int | None = None
-_CACHED_CLUSTER_PREP: tuple[int, tuple[int, ...], any] | None = None
+_CACHED_OPTIMAL_K_RESULTS: dict | None = None
+_CACHED_CLUSTER_PREP: Tuple[int, Tuple[Any, ...], Tuple[Any, pd.DataFrame, np.ndarray]] | None = None
 
 
 # ==================== HELPER FUNCTIONS ====================
 
 
-def _prepare_cluster_dataset() -> tuple[any, pd.DataFrame, np.ndarray]:
-    """Prepare and cache cluster dataset."""
-    ctx = get_context()
+def _prepare_cluster_dataset() -> Tuple[Any, pd.DataFrame, np.ndarray]:
+    """Prepare and cache cluster dataset using original feature data (not PCA)."""
+    global _CACHED_CLUSTER_PREP
+    
+    try:
+        ctx = get_context()
+    except Exception as exc:
+        _CACHED_CLUSTER_PREP = None
+        raise ValueError(f"Erro ao carregar contexto de dados: {exc}") from exc
+    
+    # Verify clusterer is available
+    if ctx.clusterer is None:
+        _CACHED_CLUSTER_PREP = None
+        raise ValueError("Clusterizador não disponível. Execute: python scripts/train_models.py --use-kmodes")
+    
+    if ctx.clusterer.feature_names is None:
+        _CACHED_CLUSTER_PREP = None
+        raise ValueError("Modelo de clusterização não possui feature_names. Retreine o modelo.")
+    
     try:
         feature_frame = get_cluster_feature_frame()
     except ValueError as exc:
-        raise ValueError(f"Erro ao preparar dados: {exc}")
+        _CACHED_CLUSTER_PREP = None
+        raise ValueError(f"Erro ao preparar features: {exc}") from exc
+    except Exception as exc:
+        _CACHED_CLUSTER_PREP = None
+        raise ValueError(f"Erro inesperado ao preparar features: {exc}") from exc
     
     # Cache prepared dataset to avoid repeated scaler.transform / dataframe selection
-    global _CACHED_CLUSTER_PREP
     df_key = (feature_frame.shape, tuple(feature_frame.columns))
     ctx_id = id(ctx)
     
@@ -45,56 +67,92 @@ def _prepare_cluster_dataset() -> tuple[any, pd.DataFrame, np.ndarray]:
         if cached_id == ctx_id and cached_key == df_key:
             return cached_data
 
-    scaler = getattr(ctx.clusterer, 'scaler', None)
-    if scaler is None:
-        raise ValueError("Scaler do clusterizador não encontrado.")
-
-    X_scaled = scaler.transform(feature_frame)
+    # Use the clusterer's prepare_data method to ensure consistency
+    clusterer = ctx.clusterer
+    if clusterer is None:
+        raise ValueError("Clusterizador não encontrado.")
+    
+    # Prepare data using the same method as training
+    try:
+        X_scaled = clusterer.prepare_data(feature_frame)
+    except Exception as exc:
+        _CACHED_CLUSTER_PREP = None
+        raise ValueError(f"Erro ao preparar dados para clustering (modo: {clusterer.mode}): {exc}") from exc
+    
     _CACHED_CLUSTER_PREP = (ctx_id, df_key, (ctx, feature_frame, X_scaled))
     return ctx, feature_frame, X_scaled
 
 
-def _fit_kmeans_labels(X_scaled: np.ndarray, n_clusters: int) -> np.ndarray:
-    """Fit KMeans and return labels."""
-    model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    return model.fit_predict(X_scaled)
-
-
-def _get_elbow_k(X_scaled: np.ndarray) -> int:
-    """Calculate optimal K using elbow method."""
-    global _CACHED_ELBOW_K
-    if _CACHED_ELBOW_K is not None:
-        return _CACHED_ELBOW_K
-
-    max_k = min(10, X_scaled.shape[0])
-    scanned_ks: list[int] = []
-    inertias: list[float] = []
-
-    for k in range(2, max_k):
-        try:
-            model = KMeans(n_clusters=k, random_state=42, n_init=10)
-            model.fit(X_scaled)
-            scanned_ks.append(k)
-            inertias.append(model.inertia_)
-        except Exception:
-            continue
-
-    if not inertias:
-        _CACHED_ELBOW_K = 3
-        return _CACHED_ELBOW_K
-
-    if len(inertias) < 3:
-        _CACHED_ELBOW_K = scanned_ks[0]
-        return _CACHED_ELBOW_K
-
-    second_diff = np.diff(inertias, n=2)
-    idx = int(np.argmin(second_diff)) + 2
-    if idx >= len(scanned_ks):
-        _CACHED_ELBOW_K = scanned_ks[-1]
-    else:
-        _CACHED_ELBOW_K = scanned_ks[idx]
+def _get_optimal_k_analysis(X_scaled: np.ndarray, mode: Literal['kmeans', 'kmodes'] = 'kmodes') -> dict:
+    """Get optimal K analysis using DiseaseClusterer methods."""
+    global _CACHED_OPTIMAL_K_RESULTS
     
-    return _CACHED_ELBOW_K
+    if _CACHED_OPTIMAL_K_RESULTS is not None:
+        return _CACHED_OPTIMAL_K_RESULTS
+    
+    # Create a temporary clusterer to use its find_optimal_clusters method
+    temp_clusterer = DiseaseClusterer(random_state=42, mode=mode)
+    
+    # Use the clusterer's method which already handles sampling efficiently
+    results = temp_clusterer.find_optimal_clusters(X_scaled, max_clusters=10, sample_size=1000)
+    
+    _CACHED_OPTIMAL_K_RESULTS = results
+    return results
+
+
+def _get_hover_info(df: pd.DataFrame, indices: np.ndarray, ctx) -> list[str]:
+    """Cria informações de hover detalhadas para cada ponto.
+    
+    Args:
+        df: DataFrame original
+        indices: Índices dos pontos
+        ctx: Contexto com informações do dataset
+        
+    Returns:
+        Lista de strings formatadas para hover
+    """
+    hover_texts = []
+    diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
+    
+    for idx in indices:
+        if idx >= len(df):
+            hover_texts.append("Índice inválido")
+            continue
+            
+        row = df.iloc[idx]
+        
+        # Diagnóstico
+        diagnosis = row.get(diagnosis_col, 'N/A')
+        
+        # Demografia
+        age = row.get('Idade', 'N/A')
+        gender = row.get('Gênero', row.get('Sexo', 'N/A'))
+        
+        # Sintomas principais (colunas binárias)
+        symptoms = []
+        for col in df.columns:
+            if col.startswith(('Febre', 'Tosse', 'Dor', 'Falta', 'Náusea', 'Diarreia', 
+                              'Fadiga', 'Coriza', 'Espirro', 'Congestão')):
+                if row.get(col, 0) == 1:
+                    symptoms.append(col.replace('_', ' '))
+        
+        symptoms_str = ', '.join(symptoms[:3]) if symptoms else 'Nenhum registrado'
+        if len(symptoms) > 3:
+            symptoms_str += f' (+{len(symptoms)-3})'
+        
+        # Fatores climáticos
+        temp = row.get('Temperatura (°C)', 'N/A')
+        humidity = row.get('Umidade', 'N/A')
+        
+        hover_text = (
+            f"<b>Diagnóstico: {diagnosis}</b><br>"
+            f"Idade: {age} | Gênero: {gender}<br>"
+            f"Sintomas: {symptoms_str}<br>"
+            f"Temp: {temp}°C | Umidade: {humidity}"
+        )
+        hover_texts.append(hover_text)
+    
+    return hover_texts
 
 
 def _prepare_climate_clusters(k: int) -> tuple[pd.DataFrame, list[str]]:
@@ -138,7 +196,7 @@ def _prepare_climate_clusters(k: int) -> tuple[pd.DataFrame, list[str]]:
 
 # ==================== LAYOUT ====================
 
-def create_layout() -> html.Div:
+def create_layout():
     """Create ML Clustering tab layout."""
     return dcc.Loading(
         id="loading-ml-clustering",
@@ -150,12 +208,29 @@ def create_layout() -> html.Div:
 
 def _create_clustering_content() -> html.Div:
     """Create the actual clustering content."""
-    ctx = get_context()
+    try:
+        ctx = get_context()
+    except Exception as exc:
+        return html.Div([
+            page_header(
+                '🔬 Modelos ML - Clusterização',
+                'Análise de Padrões e Agrupamentos',
+                'Erro ao carregar contexto de dados'
+            ),
+            html.Div([
+                dbc.Alert(
+                    f"Erro: {str(exc)}",
+                    color='danger',
+                    style={'margin': '20px'}
+                )
+            ])
+        ])
     
     # Check if clusterer is available
     clusterer_available = (
         ctx.clusterer is not None 
         and getattr(ctx.clusterer, 'model', None) is not None
+        and getattr(ctx.clusterer, 'feature_names', None) is not None
     )
     
     if not clusterer_available:
@@ -170,15 +245,28 @@ def _create_clustering_content() -> html.Div:
                     [
                         html.Span('⚠️', style={'fontSize': '1.3em', 'marginRight': '12px'}),
                         html.Div([
-                            html.Strong('Clusterizador não disponível', style={'display': 'block'}),
-                            html.Span('Execute o treinamento do modelo de clusterização para usar esta aba.')
+                            html.Strong('Clusterizador não disponível', style={'display': 'block', 'marginBottom': '10px'}),
+                            html.P('Execute o treinamento do modelo de clusterização para usar esta aba.', style={'marginBottom': '10px'}),
+                            html.Hr(style={'borderColor': 'rgba(255, 193, 7, 0.3)', 'margin': '10px 0'}),
+                            html.P([
+                                html.Strong('Como treinar:'),
+                                html.Br(),
+                                '1. Abra o terminal no diretório raiz do projeto',
+                                html.Br(),
+                                '2. Ative o ambiente virtual: ',
+                                html.Code('.venv\\Scripts\\activate', style={'backgroundColor': 'rgba(0,0,0,0.2)', 'padding': '2px 6px', 'borderRadius': '4px'}),
+                                html.Br(),
+                                '3. Execute: ',
+                                html.Code('python scripts/train_models.py --use-kmodes', style={'backgroundColor': 'rgba(0,0,0,0.2)', 'padding': '2px 6px', 'borderRadius': '4px'})
+                            ], style={'fontSize': '0.9em', 'lineHeight': '1.8'})
                         ], style={'display': 'inline-block'})
                     ],
                     color='warning',
                     style={
                         'backgroundColor': f'rgba(255, 193, 7, 0.15)',
                         'borderLeft': '4px solid #FFC107',
-                        'borderRadius': '8px'
+                        'borderRadius': '8px',
+                        'margin': '20px'
                     }
                 )
             ], style={'padding': '20px'})
@@ -200,12 +288,67 @@ def _create_clustering_content() -> html.Div:
             ], '📊 Resumo do Modelo de Clusterização')
         ], style={'marginBottom': '20px'}),
         
-        # PCA 3D Visualization
+        # K Selection Methods Visualization
         html.Div([
-            create_card([
-                dcc.Graph(id='cluster-pca-3d-graph')
-            ], '🎨 Visualização 3D - PCA dos Clusters')
-        ], style={'marginBottom': '20px'}),
+            html.H3('📊 Seleção do Número Ótimo de Clusters (K)', style={
+                'color': COLORS['text'],
+                'marginBottom': '20px',
+                'fontSize': '1.7em',
+                'fontWeight': '700',
+                'borderLeft': f'6px solid {COLORS["primary"]}',
+                'paddingLeft': '14px',
+            }),
+            
+            html.Div([
+                html.Div([
+                    create_card([
+                        dcc.Graph(id='cluster-elbow-graph')
+                    ], '📐 Método do Cotovelo (Elbow)')
+                ], style={'flex': '1', 'minWidth': '400px'}),
+                
+                html.Div([
+                    create_card([
+                        dcc.Graph(id='cluster-silhouette-graph')
+                    ], '📏 Análise de Silhueta')
+                ], style={'flex': '1', 'minWidth': '400px'}),
+            ], style={
+                'display': 'flex',
+                'gap': '20px',
+                'flexWrap': 'wrap',
+                'marginBottom': '20px'
+            })
+        ], style={'marginBottom': '30px'}),
+        
+        # PCA 3D Visualizations - Both K methods
+        html.Div([
+            html.H3('🎨 Visualizações 3D - PCA dos Clusters', style={
+                'color': COLORS['text'],
+                'marginBottom': '20px',
+                'fontSize': '1.7em',
+                'fontWeight': '700',
+                'borderLeft': f'6px solid {COLORS["accent"]}',
+                'paddingLeft': '14px',
+            }),
+            
+            html.Div([
+                html.Div([
+                    create_card([
+                        dcc.Graph(id='cluster-pca-3d-elbow-graph')
+                    ], '📐 PCA 3D - K Cotovelo')
+                ], style={'flex': '1', 'minWidth': '500px'}),
+                
+                html.Div([
+                    create_card([
+                        dcc.Graph(id='cluster-pca-3d-silhouette-graph')
+                    ], '📏 PCA 3D - K Silhueta')
+                ], style={'flex': '1', 'minWidth': '500px'}),
+            ], style={
+                'display': 'flex',
+                'gap': '20px',
+                'flexWrap': 'wrap',
+                'marginBottom': '20px'
+            })
+        ], style={'marginBottom': '30px'}),
         
         # Climate-based Clustering Section
         html.Div([
@@ -281,14 +424,26 @@ def update_cluster_summary(tab):
     if tab != 'tab-clustering':
         return html.P('Aguardando carregamento...', style={'color': COLORS['text_secondary']})
     
-    ctx = get_context()
+    try:
+        ctx = get_context()
+    except Exception as exc:
+        return dbc.Alert(f'Erro ao carregar dados: {str(exc)}', color='danger')
+    
     clusterer = ctx.clusterer
     
     if clusterer is None or clusterer.model is None:
         return dbc.Alert('Modelo de clusterização não disponível.', color='warning')
     
-    n_clusters = len(np.unique(clusterer.model.labels_))
+    # Get labels safely
+    if hasattr(clusterer.model, 'labels_') and clusterer.model.labels_ is not None:
+        n_clusters = len(np.unique(clusterer.model.labels_))
+    elif hasattr(clusterer.model, 'n_clusters'):
+        n_clusters = clusterer.model.n_clusters
+    else:
+        n_clusters = 'N/A'
+    
     n_features = len(clusterer.feature_names) if clusterer.feature_names else 'N/A'
+    algorithm_name = 'K-Modes' if clusterer.mode == 'kmodes' else 'K-Means'
     
     return html.Div([
         dbc.Row([
@@ -319,7 +474,7 @@ def update_cluster_summary(tab):
             dbc.Col([
                 html.Div([
                     html.H6('Algoritmo', style={'color': COLORS['text_secondary'], 'fontSize': '0.85em'}),
-                    html.H4('K-Means', style={'color': COLORS['success'], 'fontWeight': '700'})
+                    html.H4(algorithm_name, style={'color': COLORS['success'], 'fontWeight': '700'})
                 ], style={
                     'padding': '16px',
                     'backgroundColor': COLORS['background'],
@@ -332,11 +487,11 @@ def update_cluster_summary(tab):
 
 
 @callback(
-    Output('cluster-pca-3d-graph', 'figure'),
+    Output('cluster-elbow-graph', 'figure'),
     Input('tabs', 'value')
 )
-def update_cluster_pca_3d(tab):
-    """Update PCA 3D cluster visualization."""
+def update_cluster_elbow(tab):
+    """Update elbow method graph using DiseaseClusterer."""
     if tab != 'tab-clustering':
         return go.Figure()
     
@@ -345,18 +500,189 @@ def update_cluster_pca_3d(tab):
     except ValueError as exc:
         return error_figure(str(exc))
     
+    # Get optimal K analysis from clusterer
+    results = _get_optimal_k_analysis(X_scaled)
+    
+    ks = results['ks']
+    inertias = results['inertias']
+    elbow_k = results.get('elbow_k')
+    
+    if elbow_k is None:
+        elbow_k = ks[0] if ks else 3
+    
+    fig = go.Figure()
+    
+    # Line plot
+    fig.add_trace(go.Scatter(
+        x=ks,
+        y=inertias,
+        mode='lines+markers',
+        name='Inércia',
+        line=dict(color=COLORS['primary'], width=3),
+        marker=dict(size=8, color=COLORS['primary'], line=dict(width=2, color='white')),
+        hovertemplate='<b>K=%{x}</b><br>Inércia: %{y:.2f}<extra></extra>'
+    ))
+    
+    # Highlight elbow point
+    if elbow_k in ks:
+        elbow_idx = ks.index(elbow_k)
+        elbow_inertia = inertias[elbow_idx]
+        fig.add_trace(go.Scatter(
+            x=[elbow_k],
+            y=[elbow_inertia],
+            mode='markers',
+            name=f'Cotovelo (K={elbow_k})',
+            marker=dict(size=15, color=COLORS['accent'], symbol='star', line=dict(width=2, color='white')),
+            hovertemplate=f'<b>K Ótimo: {elbow_k}</b><br>Inércia: {elbow_inertia:.2f}<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        xaxis_title='Número de Clusters (K)',
+        yaxis_title='Inércia (Within-Cluster Sum of Squares)',
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font=dict(color=COLORS['text'], family='Inter, sans-serif'),
+        height=400,
+        showlegend=True,
+        legend=dict(
+            yanchor='top',
+            y=0.99,
+            xanchor='right',
+            x=0.99,
+            bgcolor='rgba(30, 33, 57, 0.8)',
+            bordercolor=COLORS['border'],
+            borderwidth=1
+        ),
+        xaxis=dict(gridcolor=COLORS['border'], dtick=1),
+        yaxis=dict(gridcolor=COLORS['border']),
+        hovermode='x unified'
+    )
+    
+    return fig
+
+
+@callback(
+    Output('cluster-silhouette-graph', 'figure'),
+    Input('tabs', 'value')
+)
+def update_cluster_silhouette(tab):
+    """Update silhouette analysis graph using DiseaseClusterer."""
+    if tab != 'tab-clustering':
+        return go.Figure()
+    
+    try:
+        ctx, feature_frame, X_scaled = _prepare_cluster_dataset()
+    except ValueError as exc:
+        return error_figure(str(exc))
+    
+    # Get optimal K analysis from clusterer
+    results = _get_optimal_k_analysis(X_scaled)
+    
+    ks = results['ks']
+    silhouette_scores = results['silhouette_scores']
+    best_k = results.get('silhouette_best_k')
+    
+    # Filter out NaN scores
+    valid_data = [(k, s) for k, s in zip(ks, silhouette_scores) if not np.isnan(s)]
+    
+    if not valid_data:
+        return error_figure("Não foi possível calcular scores de silhueta válidos.")
+    
+    valid_ks, valid_scores = zip(*valid_data)
+    
+    if best_k is None and valid_scores:
+        best_k = valid_ks[int(np.argmax(valid_scores))]
+    
+    fig = go.Figure()
+    
+    # Bar plot
+    colors = [COLORS['accent'] if k == best_k else COLORS['primary'] for k in valid_ks]
+    
+    fig.add_trace(go.Bar(
+        x=valid_ks,
+        y=valid_scores,
+        marker=dict(color=colors, line=dict(width=2, color='white')),
+        hovertemplate='<b>K=%{x}</b><br>Silhueta: %{y:.4f}<extra></extra>',
+        name='Score de Silhueta'
+    ))
+    
+    # Add annotation for best K
+    if best_k in valid_ks:
+        best_idx = list(valid_ks).index(best_k)
+        best_score = valid_scores[best_idx]
+        fig.add_annotation(
+            x=best_k,
+            y=best_score,
+            text=f'Melhor K={best_k}',
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=2,
+            arrowcolor=COLORS['accent'],
+            ax=0,
+            ay=-40,
+            font=dict(size=12, color=COLORS['text'], weight='bold'),
+            bgcolor='rgba(30, 33, 57, 0.9)',
+            bordercolor=COLORS['accent'],
+            borderwidth=2,
+            borderpad=4
+        )
+    
+    fig.update_layout(
+        xaxis_title='Número de Clusters (K)',
+        yaxis_title='Score de Silhueta (maior é melhor)',
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font=dict(color=COLORS['text'], family='Inter, sans-serif'),
+        height=400,
+        showlegend=False,
+        xaxis=dict(gridcolor=COLORS['border'], dtick=1),
+        yaxis=dict(gridcolor=COLORS['border'], range=[0, 1]),
+        hovermode='x unified'
+    )
+    
+    return fig
+
+
+@callback(
+    Output('cluster-pca-3d-elbow-graph', 'figure'),
+    Input('tabs', 'value')
+)
+def update_cluster_pca_3d_elbow(tab):
+    """Update PCA 3D cluster visualization using elbow K."""
+    if tab != 'tab-clustering':
+        return go.Figure()
+    
+    try:
+        ctx, feature_frame, X_scaled = _prepare_cluster_dataset()
+    except ValueError as exc:
+        return error_figure(str(exc))
+    
+    # Get optimal K analysis from clusterer
+    results = _get_optimal_k_analysis(X_scaled, mode='kmodes')
+    elbow_k = results.get('elbow_k')
+    
+    if elbow_k is None:
+        elbow_k = 3  # Default fallback
+    
+    # Fit KMeans with elbow K
+    model = KMeans(n_clusters=elbow_k, random_state=42, n_init=10)
+    labels = model.fit_predict(X_scaled)
+    
     # Perform PCA
     pca = PCA(n_components=3, random_state=42)
     X_pca = pca.fit_transform(X_scaled)
     
-    # Get cluster labels
-    labels = ctx.clusterer.model.labels_
+    # Get hover information
+    hover_texts = _get_hover_info(ctx.df, feature_frame.index.to_numpy(), ctx)
     
     # Create 3D scatter
     fig = go.Figure()
     
     for cluster_id in np.unique(labels):
         mask = labels == cluster_id
+        cluster_indices = np.where(mask)[0]
+        
         fig.add_trace(go.Scatter3d(
             x=X_pca[mask, 0],
             y=X_pca[mask, 1],
@@ -368,8 +694,8 @@ def update_cluster_pca_3d(tab):
                 opacity=0.7,
                 line=dict(width=0.5, color='white')
             ),
-            hovertemplate='<b>Cluster %{text}</b><br>PC1: %{x:.2f}<br>PC2: %{y:.2f}<br>PC3: %{z:.2f}<extra></extra>',
-            text=[cluster_id] * sum(mask)
+            hovertemplate='%{text}<extra></extra>',
+            text=[hover_texts[i] for i in cluster_indices]
         ))
     
     explained_var = pca.explained_variance_ratio_
@@ -379,7 +705,10 @@ def update_cluster_pca_3d(tab):
             xaxis_title=f'PC1 ({explained_var[0]*100:.1f}%)',
             yaxis_title=f'PC2 ({explained_var[1]*100:.1f}%)',
             zaxis_title=f'PC3 ({explained_var[2]*100:.1f}%)',
-            bgcolor=COLORS['background']
+            bgcolor=COLORS['secondary'],
+            xaxis=dict(backgroundcolor=COLORS['secondary'], gridcolor=COLORS['border']),
+            yaxis=dict(backgroundcolor=COLORS['secondary'], gridcolor=COLORS['border']),
+            zaxis=dict(backgroundcolor=COLORS['secondary'], gridcolor=COLORS['border'])
         ),
         plot_bgcolor=COLORS['background'],
         paper_bgcolor=COLORS['card'],
@@ -395,7 +724,99 @@ def update_cluster_pca_3d(tab):
             bordercolor=COLORS['border'],
             borderwidth=1
         ),
-        title=f'Variância Explicada Total: {sum(explained_var)*100:.1f}%'
+        title=dict(
+            text=f'K={elbow_k} (Método Cotovelo - K-Modes) | Variância Explicada: {sum(explained_var)*100:.1f}%',
+            font=dict(size=14, color=COLORS['text'])
+        )
+    )
+    
+    return fig
+
+
+@callback(
+    Output('cluster-pca-3d-silhouette-graph', 'figure'),
+    Input('tabs', 'value')
+)
+def update_cluster_pca_3d_silhouette(tab):
+    """Update PCA 3D cluster visualization using silhouette K."""
+    if tab != 'tab-clustering':
+        return go.Figure()
+    
+    try:
+        ctx, feature_frame, X_scaled = _prepare_cluster_dataset()
+    except ValueError as exc:
+        return error_figure(str(exc))
+    
+    # Get optimal K analysis from clusterer
+    results = _get_optimal_k_analysis(X_scaled, mode='kmodes')
+    silhouette_k = results.get('silhouette_best_k')
+    
+    if silhouette_k is None:
+        silhouette_k = 3  # Default fallback
+    
+    # Fit KMeans with silhouette K
+    model = KMeans(n_clusters=silhouette_k, random_state=42, n_init=10)
+    labels = model.fit_predict(X_scaled)
+    
+    # Perform PCA
+    pca = PCA(n_components=3, random_state=42)
+    X_pca = pca.fit_transform(X_scaled)
+    
+    # Get hover information
+    hover_texts = _get_hover_info(ctx.df, feature_frame.index.to_numpy(), ctx)
+    
+    # Create 3D scatter
+    fig = go.Figure()
+    
+    for cluster_id in np.unique(labels):
+        mask = labels == cluster_id
+        cluster_indices = np.where(mask)[0]
+        
+        fig.add_trace(go.Scatter3d(
+            x=X_pca[mask, 0],
+            y=X_pca[mask, 1],
+            z=X_pca[mask, 2],
+            mode='markers',
+            name=f'Cluster {cluster_id}',
+            marker=dict(
+                size=5,
+                opacity=0.7,
+                line=dict(width=0.5, color='white')
+            ),
+            hovertemplate='%{text}<extra></extra>',
+            text=[hover_texts[i] for i in cluster_indices]
+        ))
+    
+    explained_var = pca.explained_variance_ratio_
+    
+    fig.update_layout(
+        scene=dict(
+            xaxis_title=f'PC1 ({explained_var[0]*100:.1f}%)',
+            yaxis_title=f'PC2 ({explained_var[1]*100:.1f}%)',
+            zaxis_title=f'PC3 ({explained_var[2]*100:.1f}%)',
+            bgcolor=COLORS['secondary'],
+            xaxis=dict(backgroundcolor=COLORS['secondary'], gridcolor=COLORS['border']),
+            yaxis=dict(backgroundcolor=COLORS['secondary'], gridcolor=COLORS['border']),
+            zaxis=dict(backgroundcolor=COLORS['secondary'], gridcolor=COLORS['border'])
+        ),
+        plot_bgcolor=COLORS['background'],
+        paper_bgcolor=COLORS['card'],
+        font=dict(color=COLORS['text'], family='Inter, sans-serif'),
+        height=600,
+        showlegend=True,
+        legend=dict(
+            yanchor='top',
+            y=0.99,
+            xanchor='left',
+            x=0.01,
+            bgcolor='rgba(30, 33, 57, 0.8)',
+            bordercolor=COLORS['border'],
+            borderwidth=1
+        ),
+        title=dict(
+            text=f'K={silhouette_k} (Método Silhueta - K-Modes) | Variância Explicada: {sum(explained_var)*100:.1f}%',
+            font=dict(size=14, color=COLORS['text'])
+        )
     )
     
     return fig
@@ -415,10 +836,18 @@ def update_climate_cluster_3d(tab, k):
     except ValueError as exc:
         return error_figure(str(exc))
     
+    # Get DataContext for hover information
+    ctx = get_context()
+    
     fig = go.Figure()
     
     for cluster_id in sorted(plot_df['Cluster'].unique()):
         cluster_data = plot_df[plot_df['Cluster'] == cluster_id]
+        cluster_indices = cluster_data.index.tolist()
+        
+        # Get hover information for each point
+        hover_texts = _get_hover_info(ctx.df, cluster_indices, ctx)
+        
         fig.add_trace(go.Scatter3d(
             x=cluster_data[climate_vars[0]],
             y=cluster_data[climate_vars[1]],
@@ -426,8 +855,8 @@ def update_climate_cluster_3d(tab, k):
             mode='markers',
             name=f'Cluster {cluster_id}',
             marker=dict(size=4, opacity=0.6),
-            hovertemplate='<b>Cluster %{text}</b><br>Temp: %{x:.1f}°C<br>Umidade: %{y:.2f}<br>Vento: %{z:.1f} km/h<extra></extra>',
-            text=[cluster_id] * len(cluster_data)
+            hovertemplate='%{text}<extra></extra>',
+            text=hover_texts
         ))
     
     fig.update_layout(
@@ -435,7 +864,10 @@ def update_climate_cluster_3d(tab, k):
             xaxis_title='Temperatura (°C)',
             yaxis_title='Umidade',
             zaxis_title='Velocidade do Vento (km/h)',
-            bgcolor=COLORS['background']
+            bgcolor=COLORS['secondary'],
+            xaxis=dict(backgroundcolor=COLORS['secondary'], gridcolor=COLORS['border']),
+            yaxis=dict(backgroundcolor=COLORS['secondary'], gridcolor=COLORS['border']),
+            zaxis=dict(backgroundcolor=COLORS['secondary'], gridcolor=COLORS['border'])
         ),
         plot_bgcolor=COLORS['background'],
         paper_bgcolor=COLORS['card'],
@@ -470,7 +902,13 @@ def update_cluster_diagnosis_stacked(tab):
     except ValueError as exc:
         return error_figure(str(exc))
     
-    labels = ctx.clusterer.model.labels_
+    # Get labels from the model or predict
+    if hasattr(ctx.clusterer.model, 'labels_') and ctx.clusterer.model.labels_ is not None:
+        labels = ctx.clusterer.model.labels_
+    else:
+        # Predict labels if not available
+        labels = ctx.clusterer.predict_cluster(X_scaled)
+    
     diagnosis_col = ctx.diagnosis_cols[0] if ctx.diagnosis_cols else 'Diagnóstico'
     
     # Match cluster labels with diagnosis

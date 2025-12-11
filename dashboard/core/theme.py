@@ -45,6 +45,9 @@ COLORS: Dict[str, str] = {
     'info_light': '#93c5fd',
     'hover_overlay': 'rgba(102, 126, 234, 0.1)',
     'active_overlay': 'rgba(102, 126, 234, 0.2)',
+    # Form inputs
+    'input': '#252a48',
+    'shadow': 'rgba(0, 0, 0, 0.3)',
 }
 
 INDEX_STRING = '''
@@ -246,12 +249,75 @@ INDEX_STRING = '''
                 border-radius: 6px;
             }
             
+            /* Dash Dropdown specific styles */
+            .dash-dropdown {
+                color: #e8eaf6 !important;
+            }
+            
+            .dash-dropdown .Select-control,
+            .dash-dropdown .Select {
+                background-color: #252a48 !important;
+                border-color: rgba(255, 255, 255, 0.15) !important;
+            }
+            
+            .dash-dropdown .Select-input input {
+                color: #e8eaf6 !important;
+            }
+            
+            .dash-dropdown .Select-value-label {
+                color: #e8eaf6 !important;
+            }
+            
+            .dash-dropdown .Select-placeholder {
+                color: rgba(232, 234, 246, 0.5) !important;
+            }
+            
             .custom-dropdown .Select-input input {
                 color: #e8eaf6 !important;
             }
             
+            /* Modern Dash Dropdown (react-select) */
             div[class*="css-"] input {
                 color: #e8eaf6 !important;
+            }
+            
+            /* Dropdown single value text */
+            div[class*="-singleValue"] {
+                color: #e8eaf6 !important;
+            }
+            
+            /* Dropdown placeholder */
+            div[class*="-placeholder"] {
+                color: rgba(232, 234, 246, 0.5) !important;
+            }
+            
+            /* Dropdown control (main container) */
+            div[class*="-control"] {
+                background-color: #252a48 !important;
+                border-color: rgba(255, 255, 255, 0.15) !important;
+                min-height: 44px !important;
+            }
+            
+            /* Dropdown menu */
+            div[class*="-menu"] {
+                background-color: rgba(30, 33, 57, 0.98) !important;
+                border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            }
+            
+            /* Dropdown options */
+            div[class*="-option"] {
+                background-color: transparent !important;
+                color: #e8eaf6 !important;
+            }
+            
+            div[class*="-option"]:hover {
+                background-color: rgba(102, 126, 234, 0.2) !important;
+            }
+            
+            /* Selected option */
+            div[class*="-option"][class*="selected"] {
+                background-color: rgba(102, 126, 234, 0.3) !important;
+                color: #a4a8ff !important;
             }
             
             div[class*="singleValue"] {
