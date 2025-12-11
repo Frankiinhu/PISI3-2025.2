@@ -103,10 +103,11 @@ def create_prognosis_tab() -> html.Div:
                                 clearable=False,
                                 searchable=False,
                                 style={
-                                    'width': '100%'
+                                    'width': '100%',
+                                    'minWidth': '200px'
                                 }
                             ),
-                        ], style={'marginBottom': '15px'})
+                        ], style={'marginBottom': '15px', 'minWidth': '200px'})
                     ], title='')
                 ], style={'flex': '1', 'minWidth': '250px'}),
                 
@@ -250,9 +251,12 @@ def create_prognosis_tab() -> html.Div:
 
 def _get_symptom_columns(ctx) -> List[str]:
     """Extract symptom column names from the dataset."""
-    symptom_prefixes = ['Febre', 'Tosse', 'Dor', 'Fadiga', 'Náusea', 'Congestionamento']
-    symptom_cols = [col for col in ctx.df.columns 
-                    if any(col.startswith(prefix) for prefix in symptom_prefixes)]
+    # Colunas que não são sintomas
+    non_symptom_cols = ['Idade', 'Gênero', 'Temperatura (°C)', 'Umidade', 
+                        'Velocidade do Vento (km/h)', 'Diagnóstico']
+    
+    # Todos os outros são sintomas
+    symptom_cols = [col for col in ctx.df.columns if col not in non_symptom_cols]
     return sorted(symptom_cols)
 
 
