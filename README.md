@@ -1,125 +1,100 @@
-🌡️ NimbusVita - Weather Related Disease Prediction
+**NimbusVita — Dashboard de Saúde e Clima**
 
-NimbusVita combina análise exploratória, modelagem de aprendizado de máquina e visualizações interativas em Dash para investigar doenças relacionadas ao clima. O fluxo atual prioriza dois componentes principais:
+Breve descrição
 
-- Treinamento de modelos de classificação e clusterização a partir do dataset `DATASET FINAL WRDP.csv`.
-- Dashboard interativo (`dashboard/app_complete.py`) com métricas, PCA 3D, análise de clusters (k fixo e dinâmico) e visões climáticas.
-- **🎨 Sistema de Temas Escuro/Claro** com alternância dinâmica e persistência de preferência.
+Este projeto é um painel interativo (Dash) para explorar e analisar um conjunto de dados que combina variáveis climáticas, informações demográficas e indicadores de saúde. O objetivo é facilitar a análise exploratória, visualizar padrões e comparar resultados de modelos de classificação e clusterização aplicados ao mesmo conjunto de dados.
 
-🎨 Novo: Sistema de Temas
+Principais recursos
 
-O dashboard agora oferece um **sistema completo de alternância de temas**:
+- Aplicação Dash com navegação por abas: **Visão Geral**, **Análise Exploratória**, **Classificação & SHAP**, **Clusterização**, **Prognóstico** e **Pipeline & Tuning** (`dashboard/app_complete.py`).
+- Sistema de temas com toggle e persistência (dark/light) (`dashboard/components_theme.py`, `dashboard/core/theme_manager.py`).
+- Componentes de UI reutilizáveis: cards com gradiente ou glassmorphism, KPI cards, badges e alertas responsivos (`dashboard/components.py`, `examples_visual_improvements.py`).
+- Template visual consistente para Plotly (cores, legendas, fundo), aplicado por `dashboard/core/theme.py::apply_plotly_template`.
+- Filtros interativos e estratificação (por `Gênero`, faixas de `Idade`) e alertas automáticos sobre qualidade dos dados (dados insuficientes, classes desbalanceadas).
+- Integração completa com modelos de ML:
+   - Classificação: treinamento, avaliação e exportação de métricas; comparação entre modelos; suporte a SMOTE.
+   - Hyperparameter tuning: GridSearchCV e RandomizedSearchCV com armazenamento dos melhores parâmetros.
+   - Explicabilidade: cálculo de SHAP (TreeExplainer) e geração de visualizações (feature importance, beeswarm, force plots) (`src/models/classifier.py`).
+- Clusterização:
+   - Suporta K-Means e K-Modes (quando a dependência `kmodes` estiver presente).
+   - Busca automática de `k` ótimo (silhouette e método do cotovelo) e métricas de avaliação (silhouette, Davies–Bouldin, Calinski–Harabasz).
+   - Redução de dimensionalidade via PCA para visualização (PCA 3D).
+- DataContext centralizado que carrega o dataset, EDA e tenta carregar modelos pré-treinados de `models/saved_models/` (`dashboard/core/data_context.py`).
+- Scripts e utilitários:
+   - `scripts/train_models.py`: CLI para treinar classificador e clusterizador (opções: SMOTE, tuning, escolha de algoritmo).
+   - `train_interactive.py`: assistente interativo para treinar com diferentes níveis de complexidade e SHAP.
+   - `examples_visual_improvements.py`: exemplos prontos de layout, KPIs e templates para reaproveitamento.
 
-- **🌙 Tema Escuro**: Interface escura, ideal para ambientes com pouca luz
-- **☀️ Tema Claro**: Interface clara, ideal para ambientes bem iluminados
-- **💾 Persistência**: Sua preferência é salva automaticamente e recuperada ao recarregar
-- **⚡ Instantâneo**: Mudança de tema sem recarregar a página
-
-Para usar, clique no botão 🌙/☀️ no canto superior direito do header do dashboard.
-
-📚 Documentação de Temas:
-- `THEME_SYSTEM_DOCUMENTATION.md` - Documentação técnica completa
-- `USER_GUIDE_THEMES.md` - Guia para usuários finais
-- `THEME_SUMMARY.md` - Sumário executivo
-
-🏗️ Estrutura Principal
+Estrutura resumida
 
 ```
 PISI3-2025.2/
-├── data/                     # Arquivos de dados (inclui DATASET FINAL WRDP.csv)
-├── dashboard/                # Aplicação Dash
-│   ├── app_complete.py       # Entry point do dashboard
-│   ├── components.py         # Utilidades de layout
-│   ├── components_theme.py   # ✨ Componentes de temas
-│   ├── theme_integration.py  # ✨ Integração de temas
-│   ├── core/
-│   │   ├── data_context.py
-│   │   ├── theme.py          # 🔧 Temas e CSS (atualizado)
-│   │   └── theme_manager.py  # ✨ Gerenciador de temas
-│   ├── models/saved_models/  # Modelos pré-treinados (.pkl)
-│   └── views/                # Abas e callbacks
-├── scripts/
-│   └── train_models.py       # Pipeline CLI para treinar e salvar modelos
-├── src/
-│   ├── data_processing/      # DataLoader e EDA helpers
-│   └── models/               # Implementações de classificação/clusterização
+├── data/                       # Datasets (ex.: DATASET FINAL WRDP.csv)
+├── dashboard/                  # Aplicação Dash (app_complete.py)
+├── scripts/                    # Scripts para treinar modelos e gerar análises
+│   └── train_models.py
+├── src/                        # Helpers de processamento e modelos
 ├── requirements.txt
-├── README.md
-├── THEME_SYSTEM_DOCUMENTATION.md  # ✨ Documentação técnica de temas
-├── USER_GUIDE_THEMES.md           # ✨ Guia para usuários
-├── THEME_SUMMARY.md               # ✨ Sumário executivo
-└── test_theme_integration.py      # ✨ Testes de temas
+└── README.md
 ```
 
-�️ Preparação do Ambiente
+Como começar (rápido)
 
-1. Clonar o repositório
-   ```bash
+1. Clone o repositório
+
    git clone https://github.com/Frankiinhu/PISI3-2025.2.git
    cd PISI3-2025.2
-   ```
 
-2. Criar e ativar um ambiente virtual
-   ```powershell
+2. Crie e ative um ambiente virtual
+
+   # Windows (PowerShell)
    python -m venv .venv
    .\.venv\Scripts\Activate.ps1
-   ```
-   ```bash
+
+   # macOS / Linux
    python3 -m venv .venv
    source .venv/bin/activate
-   ```
 
-3. Instalar dependências
-   ```bash
+3. Instale dependências
+
    pip install -r requirements.txt
-   ```
 
-📈 Treinamento dos Modelos
+Treinar modelos (opcional)
 
-Certifique-se de que o dataset esteja em `data/DATASET FINAL WRDP.csv`. Em seguida, execute:
+Coloque o arquivo de dados em `data/DATASET FINAL WRDP.csv` e rode:
 
-```bash
-python scripts/train_models.py --data data/DATASET FINAL WRDP.csv \
+```
+python scripts/train_models.py --data "data/DATASET FINAL WRDP.csv" \
     --out-dir dashboard/models/saved_models \
     --classifier-name classifier_model.pkl \
     --clusterer-name clustering_model.pkl
 ```
 
-O comando salva os artefatos esperados pelo dashboard em `dashboard/models/saved_models/`. Utilize as flags `--skip-classifier` ou `--skip-clusterer` se quiser treinar um modelo por vez.
+Se preferir já usar modelos pré-treinados, coloque-os em `dashboard/models/saved_models/`.
 
-� Executando o Dashboard
+Executar o dashboard
 
-Com os modelos treinados, rode:
-
-```bash
+```
 python -m dashboard.app_complete
 ```
 
-O Dash sobe em `http://127.0.0.1:8050`. As principais seções hoje incluem:
+Abra http://127.0.0.1:8050 no navegador.
 
-- **Visão Geral** com métricas treinadas e cartões de status.
-- **Análise Exploratório** com filtros demográficos/climáticos e gráficos dinâmicos.
-- **Modelos de ML** com PCA 3D (k definido via elbow), comparação de métricas, clusters climáticos com slider (k=3–7) e barras empilhadas (k fixo 6 vs k elbow).
+Formato esperado do dataset
 
-📚 Scripts Auxiliares
+- Variáveis climáticas (ex.: `Temperatura (°C)`, `Umidade`, `Velocidade do Vento (km/h)`).
+- Dados demográficos (ex.: `Idade`, `Gênero`).
+- Indicadores/sintomas binários (0/1).
+- Coluna alvo (ex.: `Diagnóstico`).
 
-- `scripts/advanced_analysis.py`: gera visualizações estáticas (matplotlib/seaborn) adicionais e relatórios CSV.
+Dicas rápidas de solução de problemas
 
-📂 Formato do Dataset
+- Modelos não aparecem: confirme que os arquivos `.pkl` estão em `dashboard/models/saved_models/`.
+- Erros de dependência: ative o ambiente virtual e reinstale `pip install -r requirements.txt`.
+- Colunas do dataset diferentes: atualize o `DataLoader` em `src/data_processing/` ou ajuste os nomes das colunas.
 
-O `DataLoader` espera colunas com nomes no padrão do arquivo oficial, incluindo:
+Contribuições e licença
 
-- Variáveis climáticas: `Temperatura (°C)`, `Umidade`, `Velocidade do Vento (km/h)`.
-- Dados demográficos: `Idade`, `Gênero`.
-- Sintomas binários (0/1).
-- Coluna alvo `Diagnóstico`.
+Contribuições são bem-vindas. Este projeto está disponível sob licença MIT.
 
-� Solução de Problemas
-
-- **Modelos não carregam no dashboard**: verifique se os arquivos `.pkl` atualizados estão em `dashboard/models/saved_models/` e reinicie a aplicação.
-- **Erros de dependência**: confirme que o ambiente virtual está ativo e reinstale com `pip install -r requirements.txt`.
-- **Dataset diferente**: ajuste os nomes das colunas ou atualize `DataLoader` para refletir o novo formato.
-
-📄 Licença
-
-Projeto distribuído sob a licença MIT. Contributions e sugestões são bem-vindas! Desenvolvido com ❤️ pela equipe NimbusVita.
+---
