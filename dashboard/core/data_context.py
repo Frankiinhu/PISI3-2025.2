@@ -177,21 +177,22 @@ def get_cluster_feature_frame() -> pd.DataFrame:
         return numeric_df.loc[:, ctx.clusterer.feature_names]
 
 
+def get_model_status() -> Dict[str, Optional[str]]:
+    """Return model load errors, if any, for UI surfacing."""
+    ctx = get_context()
+    return ctx.model_errors
+
+
+def get_context_version() -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """Return a version tuple based on dataset/model mtimes for caching."""
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    data_path = os.path.join(base_dir, 'data', 'DATASET FINAL WRDP.csv')
+    classifier_path = _resolve_model_path('classifier.joblib')
+    clusterer_path = _resolve_model_path('clusterer.joblib')
+    return (_safe_mtime(data_path), _safe_mtime(classifier_path), _safe_mtime(clusterer_path))
+
+
 def get_cluster_features_and_labels() -> Tuple[pd.DataFrame, pd.Series]:
-    def get_model_status() -> Dict[str, Optional[str]]:
-        """Return model load errors, if any, for UI surfacing."""
-        ctx = get_context()
-        return ctx.model_errors
-
-
-    def get_context_version() -> Tuple[Optional[float], Optional[float], Optional[float]]:
-        """Return a version tuple based on dataset/model mtimes for caching."""
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        data_path = os.path.join(base_dir, 'data', 'DATASET FINAL WRDP.csv')
-        classifier_path = _resolve_model_path('classifier.joblib')
-        clusterer_path = _resolve_model_path('clusterer.joblib')
-        return (_safe_mtime(data_path), _safe_mtime(classifier_path), _safe_mtime(clusterer_path))
-
     ctx = get_context()
     if getattr(ctx.clusterer, 'model', None) is None:
         raise ValueError('Clusterizador não carregado; execute o treinamento antes de gerar visualizações.')

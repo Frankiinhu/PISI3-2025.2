@@ -3,6 +3,9 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Workaround for Plotly MemoryError in validator cache
+os.environ['PLOTLY_RENDERER'] = 'json'
+
 """
 Dashboard Principal - NimbusVita (Versão Completa)
 Análise Exploratória de Doenças Relacionadas ao Clima
