@@ -5,7 +5,7 @@ import os
 import sys
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -36,9 +36,25 @@ class DataContext:
     symptom_cols: List[str]
     diagnosis_cols: List[str]
     climatic_vars: List[str]
+    model_errors: Dict[str, Optional[str]]
 
 
 _context: Optional[DataContext] = None
+
+
+def _resolve_model_path(model_filename: str) -> str:
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    saved_path = os.path.join(base_dir, 'models', 'saved_models', model_filename)
+    if os.path.exists(saved_path):
+        return saved_path
+    return os.path.join(base_dir, 'models', model_filename)
+
+
+def _safe_mtime(path: str) -> Optional[float]:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return None
 
 
 def load_data_context() -> DataContext:
@@ -49,6 +65,10 @@ def load_data_context() -> DataContext:
 
     logger.info("Carregando dados...")
     data_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'DATASET FINAL WRDP.csv')
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(
+            f"Dataset não encontrado em {data_path}. Verifique o arquivo CSV e tente novamente."
+        )
     loader = DataLoader(data_path)
     df_global = loader.get_clean_data()
     eda_global = ExploratoryDataAnalysis(df_global)
@@ -61,39 +81,38 @@ def load_data_context() -> DataContext:
     logger.info("Carregando modelos...")
     classifier = DiagnosisClassifier()
     clusterer = DiseaseClusterer()
+    model_errors: Dict[str, Optional[str]] = {'classifier': None, 'clusterer': None}
 
     # Tentar carregar do diretório models/ na raiz do projeto (onde train_models.py salva)
     try:
-        # Tentar primeiro em models/saved_models/classifier.joblib
-        classifier_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'saved_models', 'classifier.joblib')
-        if not os.path.exists(classifier_path):
-            # Se não encontrar, tentar em models/classifier.joblib
-            classifier_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'classifier.joblib')
-        
+        classifier_path = _resolve_model_path('classifier.joblib')
         if os.path.exists(classifier_path):
             logger.info(f"Carregando classificador de: {classifier_path}")
             classifier.load_model(classifier_path)
-            logger.info(f"Classificador carregado com sucesso. Modelo: {type(classifier.model).__name__ if classifier.model else 'None'}")
+            logger.info(
+                f"Classificador carregado com sucesso. Modelo: {type(classifier.model).__name__ if classifier.model else 'None'}"
+            )
         else:
-            logger.warning(f"Arquivo de classificador não encontrado em: {classifier_path}")
+            model_errors['classifier'] = f"Arquivo de classificador não encontrado em: {classifier_path}"
+            logger.warning(model_errors['classifier'])
     except Exception as exc:
-        logger.error(f"Erro ao carregar classificador: {exc}", exc_info=True)
+        model_errors['classifier'] = f"Erro ao carregar classificador: {exc}"
+        logger.error(model_errors['classifier'], exc_info=True)
 
     try:
-        # Tentar primeiro em models/saved_models/clusterer.joblib
-        clusterer_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'saved_models', 'clusterer.joblib')
-        if not os.path.exists(clusterer_path):
-            # Se não encontrar, tentar em models/clusterer.joblib
-            clusterer_path = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'clusterer.joblib')
-        
+        clusterer_path = _resolve_model_path('clusterer.joblib')
         if os.path.exists(clusterer_path):
             logger.info(f"Carregando clusterizador de: {clusterer_path}")
             clusterer.load_model(clusterer_path)
-            logger.info(f"Clusterizador carregado com sucesso. Modo: {clusterer.mode}, Features: {len(clusterer.feature_names) if clusterer.feature_names else 0}")
+            logger.info(
+                f"Clusterizador carregado com sucesso. Modo: {clusterer.mode}, Features: {len(clusterer.feature_names) if clusterer.feature_names else 0}"
+            )
         else:
-            logger.warning(f"Arquivo de clusterizador não encontrado em: {clusterer_path}")
+            model_errors['clusterer'] = f"Arquivo de clusterizador não encontrado em: {clusterer_path}"
+            logger.warning(model_errors['clusterer'])
     except Exception as exc:
-        logger.error(f"Erro ao carregar clusterizador: {exc}", exc_info=True)
+        model_errors['clusterer'] = f"Erro ao carregar clusterizador: {exc}"
+        logger.error(model_errors['clusterer'], exc_info=True)
 
     _context = DataContext(
         df=df_global,
@@ -104,6 +123,7 @@ def load_data_context() -> DataContext:
         symptom_cols=symptom_cols,
         diagnosis_cols=diagnosis_cols,
         climatic_vars=climatic_vars,
+        model_errors=model_errors,
     )
     return _context
 
@@ -158,6 +178,20 @@ def get_cluster_feature_frame() -> pd.DataFrame:
 
 
 def get_cluster_features_and_labels() -> Tuple[pd.DataFrame, pd.Series]:
+    def get_model_status() -> Dict[str, Optional[str]]:
+        """Return model load errors, if any, for UI surfacing."""
+        ctx = get_context()
+        return ctx.model_errors
+
+
+    def get_context_version() -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """Return a version tuple based on dataset/model mtimes for caching."""
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        data_path = os.path.join(base_dir, 'data', 'DATASET FINAL WRDP.csv')
+        classifier_path = _resolve_model_path('classifier.joblib')
+        clusterer_path = _resolve_model_path('clusterer.joblib')
+        return (_safe_mtime(data_path), _safe_mtime(classifier_path), _safe_mtime(clusterer_path))
+
     ctx = get_context()
     if getattr(ctx.clusterer, 'model', None) is None:
         raise ValueError('Clusterizador não carregado; execute o treinamento antes de gerar visualizações.')
@@ -177,6 +211,8 @@ __all__ = [
     'get_context',
     'get_cluster_feature_frame',
     'get_cluster_features_and_labels',
+    'get_context_version',
+    'get_model_status',
     'has_feature_importances',
     'is_classifier_available',
     'load_data_context',

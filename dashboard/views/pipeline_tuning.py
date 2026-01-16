@@ -10,33 +10,8 @@ import dash_bootstrap_components as dbc
 from ..components import create_card
 from ..core.data_context import get_context, is_classifier_available
 from ..core.theme import COLORS, page_header, error_figure as _empty_figure
+from ..utils.ui import section_header
 
-
-def _section_header(title: str, subtitle: str | None = None, accent: str = 'accent') -> html.Div:
-    """Create section header with styling."""
-    return html.Div([
-        html.H3(
-            title,
-            style={
-                'color': COLORS['text'],
-                'marginBottom': '10px',
-                'fontSize': '1.7em',
-                'fontWeight': '700',
-                'borderLeft': f'6px solid {COLORS[accent]}',
-                'paddingLeft': '14px',
-                'background': f'linear-gradient(90deg, rgba(255,255,255,0.05) 0%, transparent 100%)',
-            },
-        ),
-        html.P(
-            subtitle,
-            style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '24px',
-                'paddingLeft': '18px',
-            },
-        ) if subtitle else None,
-    ])
 
 
 def create_layout() -> html.Div:
@@ -59,7 +34,7 @@ def _create_pipeline_content() -> html.Div:
         ),
         
         # Pipeline Flow
-        _section_header(
+        section_header(
             '📊 Fluxo do Pipeline',
             'Etapas do processo de treinamento de modelos'
         ),
@@ -115,7 +90,7 @@ def _create_pipeline_content() -> html.Div:
         html.Div(id='best-params-section', children=[]),
         
         # Model Comparison
-        _section_header(
+        section_header(
             '🔍 Comparação de Modelos (4 Algoritmos)',
             'Performance com e sem SMOTE quando habilitado'
         ),

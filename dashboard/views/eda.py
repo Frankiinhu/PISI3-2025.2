@@ -1,7 +1,7 @@
 """Exploratory Analysis tab layout and callbacks."""
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+
 
 import numpy as np
 import pandas as pd
@@ -14,54 +14,8 @@ import dash_bootstrap_components as dbc
 from ..components import create_card
 from ..core.data_context import get_context, has_feature_importances, is_classifier_available
 from ..core.theme import COLORS, page_header
+from ..utils.ui import filter_dropdown, graph_card, graph_row, section_header
 
-
-def _section_header(title: str, subtitle: str | None = None, accent: str = 'accent') -> html.Div:
-    return html.Div([
-        html.H3(
-            title,
-            style={
-                'color': COLORS['text'],
-                'marginBottom': '10px',
-                'fontSize': '1.7em',
-                'fontWeight': '700',
-                'borderLeft': f'6px solid {COLORS[accent]}',
-                'paddingLeft': '14px',
-                'background': f'linear-gradient(90deg, rgba(255,255,255,0.05) 0%, transparent 100%)',
-            },
-        ),
-        html.P(
-            subtitle,
-            style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '24px',
-                'paddingLeft': '18px',
-            },
-        ) if subtitle else None,
-    ])
-
-
-def _graph_row(cards: Sequence[html.Div]) -> html.Div:
-    return html.Div(cards, style={'display': 'flex', 'flexWrap': 'wrap', 'gap': '20px', 'marginBottom': '20px'})
-
-
-def _graph_card(graph_id: str, title: str, flex: str = '1 1 360px') -> html.Div:
-    return html.Div(create_card([dcc.Graph(id=graph_id)], title), style={'flex': flex, 'minWidth': '320px'})
-
-
-def _filter_dropdown(component_id: str, label: str, options: Iterable[dict], value, width: str = '25%') -> html.Div:
-    return html.Div([
-        html.Label(label, style={'color': COLORS['text'], 'fontWeight': '600', 'display': 'block', 'marginBottom': '8px'}),
-        dcc.Dropdown(
-            id=component_id,
-            options=list(options),  # type: ignore[arg-type]
-            value=value,
-            clearable=False,
-            className='custom-dropdown',
-            style={'backgroundColor': COLORS['secondary']},
-        ),
-    ], style={'flex': f'1 1 {width}', 'minWidth': '220px'})
 
 
 def create_layout() -> html.Div:
@@ -156,21 +110,21 @@ def _create_eda_content(ctx, clean_symptoms, symptom_options, default_symptoms) 
             'Explore correlações, padrões e incidências entre variáveis climáticas, demográficas e sintomas.',
             '',
         ),
-        _section_header('🔗 Análise Bivariada', 'Relações entre variáveis climáticas e diagnósticos.'),
-        _graph_row([
-            _graph_card('temp-diagnosis-graph', 'Temperatura vs Diagnóstico'),
-            _graph_card('humidity-diagnosis-graph', 'Umidade vs Diagnóstico'),
-            _graph_card('wind-diagnosis-graph', 'Velocidade do Vento vs Diagnóstico'),
+        section_header('🔗 Análise Bivariada', 'Relações entre variáveis climáticas e diagnósticos.'),
+        graph_row([
+            graph_card('temp-diagnosis-graph', 'Temperatura vs Diagnóstico'),
+            graph_card('humidity-diagnosis-graph', 'Umidade vs Diagnóstico'),
+            graph_card('wind-diagnosis-graph', 'Velocidade do Vento vs Diagnóstico'),
         ]),
-        _graph_row([
-            _graph_card('symptom-diagnosis-correlation', 'Matriz Sintomas x Diagnósticos', flex='1 1 600px'),
-            _graph_card('correlation-matrix-graph', 'Matriz de Correlação (Top Features)', flex='1 1 600px'),
+        graph_row([
+            graph_card('symptom-diagnosis-correlation', 'Matriz Sintomas x Diagnósticos', flex='1 1 600px'),
+            graph_card('correlation-matrix-graph', 'Matriz de Correlação (Top Features)', flex='1 1 600px'),
         ]),
-        _graph_row([
-            _graph_card('age-temp-distribution', 'Distribuição Etária por Faixa Climática'),
-            _graph_card('wind-respiratory-scatter', 'Regressão: Vento vs Sintomas Respiratórios'),
+        graph_row([
+            graph_card('age-temp-distribution', 'Distribuição Etária por Faixa Climática'),
+            graph_card('wind-respiratory-scatter', 'Regressão: Vento vs Sintomas Respiratórios'),
         ]),
-        _section_header('🩺 Análise de Sintomas', 'Entenda a incidência de sintomas e diagnósticos associados.', accent='accent_secondary'),
+        section_header('🩺 Análise de Sintomas', 'Entenda a incidência de sintomas e diagnósticos associados.', accent='accent_secondary'),
         html.Div([
             html.Label('Selecione Sintomas para Análise:', style={'color': COLORS['text'], 'fontWeight': '600', 'marginBottom': '12px', 'display': 'block'}),
             dcc.Dropdown(
@@ -190,16 +144,16 @@ def _create_eda_content(ctx, clean_symptoms, symptom_options, default_symptoms) 
             'boxShadow': '0 8px 32px rgba(0,0,0,0.35)',
             'border': f'1px solid {COLORS["border"]}',
         }),
-        _graph_row([
-            _graph_card('symptom-frequency-graphs', 'Frequência de Sintomas por Diagnóstico', flex='1 1 600px'),
+        graph_row([
+            graph_card('symptom-frequency-graphs', 'Frequência de Sintomas por Diagnóstico', flex='1 1 600px'),
         ]),
-        _section_header('🌤️ Explorador Climático Interativo', 'Filtre condições e observe impactos em sintomas e diagnósticos.'),
+        section_header('🌤️ Explorador Climático Interativo', 'Filtre condições e observe impactos em sintomas e diagnósticos.'),
         html.Div([
-            _graph_row([
-                _filter_dropdown(filter_id, label, options, value) for filter_id, label, options, value in climate_filter_options
+            graph_row([
+                filter_dropdown(filter_id, label, options, value) for filter_id, label, options, value in climate_filter_options
             ]),
-            _graph_row([
-                _filter_dropdown(filter_id, label, options, value, width='40%')
+            graph_row([
+                filter_dropdown(filter_id, label, options, value, width='40%')
                 for filter_id, label, options, value in demographic_filters
             ]),
             html.Div(id='filter-stats', style={
@@ -217,9 +171,9 @@ def _create_eda_content(ctx, clean_symptoms, symptom_options, default_symptoms) 
             'border': f'1px solid {COLORS["border"]}',
             'marginBottom': '24px',
         }),
-        _graph_row([
-            _graph_card('climate-explorer-graph', 'Incidência no Perfil Selecionado', flex='1 1 600px'),
-            _graph_card('climate-correlation-graph', 'Correlação com Condições Climáticas', flex='1 1 600px'),
+        graph_row([
+            graph_card('climate-explorer-graph', 'Incidência no Perfil Selecionado', flex='1 1 600px'),
+            graph_card('climate-correlation-graph', 'Correlação com Condições Climáticas', flex='1 1 600px'),
         ]),
     ])
 

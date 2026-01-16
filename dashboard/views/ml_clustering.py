@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from functools import lru_cache
 from typing import Tuple, Any, Literal
 from dash import Input, Output, dcc, html, callback
 import plotly.graph_objects as go
@@ -17,87 +18,60 @@ from ..components import create_card
 from ..core.data_context import (
     get_cluster_feature_frame,
     get_context,
+    get_context_version,
+    get_model_status,
 )
 from ..core.theme import COLORS, page_header, error_figure
+from ..utils.ui import alert_component
 from src.models.clustering import DiseaseClusterer
-
-
-# ==================== CACHE VARIABLES ====================
-_CACHED_OPTIMAL_K_RESULTS: dict | None = None
-_CACHED_CLUSTER_PREP: Tuple[int, Tuple[Any, ...], Tuple[Any, pd.DataFrame, np.ndarray]] | None = None
 
 
 # ==================== HELPER FUNCTIONS ====================
 
 
+@lru_cache(maxsize=4)
+def _cached_cluster_prep(version_key: tuple | None) -> Tuple[pd.DataFrame, np.ndarray, str]:
+    """Cache prepared clustering data based on dataset/model mtimes."""
+    ctx = get_context()
+    if ctx.clusterer is None:
+        raise ValueError("Clusterizador não disponível. Execute: python scripts/train_models.py --use-kmodes")
+
+    if ctx.clusterer.feature_names is None:
+        raise ValueError("Modelo de clusterização não possui feature_names. Retreine o modelo.")
+
+    feature_frame = get_cluster_feature_frame()
+    clusterer = ctx.clusterer
+    X_scaled = clusterer.prepare_data(feature_frame)
+    return feature_frame, X_scaled, clusterer.mode
+
+
 def _prepare_cluster_dataset() -> Tuple[Any, pd.DataFrame, np.ndarray]:
     """Prepare and cache cluster dataset using original feature data (not PCA)."""
-    global _CACHED_CLUSTER_PREP
-    
     try:
         ctx = get_context()
+        version_key = get_context_version()
+        feature_frame, X_scaled, _ = _cached_cluster_prep(version_key)
+        return ctx, feature_frame, X_scaled
     except Exception as exc:
-        _CACHED_CLUSTER_PREP = None
-        raise ValueError(f"Erro ao carregar contexto de dados: {exc}") from exc
-    
-    # Verify clusterer is available
-    if ctx.clusterer is None:
-        _CACHED_CLUSTER_PREP = None
-        raise ValueError("Clusterizador não disponível. Execute: python scripts/train_models.py --use-kmodes")
-    
-    if ctx.clusterer.feature_names is None:
-        _CACHED_CLUSTER_PREP = None
-        raise ValueError("Modelo de clusterização não possui feature_names. Retreine o modelo.")
-    
-    try:
-        feature_frame = get_cluster_feature_frame()
-    except ValueError as exc:
-        _CACHED_CLUSTER_PREP = None
-        raise ValueError(f"Erro ao preparar features: {exc}") from exc
-    except Exception as exc:
-        _CACHED_CLUSTER_PREP = None
-        raise ValueError(f"Erro inesperado ao preparar features: {exc}") from exc
-    
-    # Cache prepared dataset to avoid repeated scaler.transform / dataframe selection
-    df_key = (feature_frame.shape, tuple(feature_frame.columns))
-    ctx_id = id(ctx)
-    
-    if _CACHED_CLUSTER_PREP is not None:
-        cached_id, cached_key, cached_data = _CACHED_CLUSTER_PREP
-        if cached_id == ctx_id and cached_key == df_key:
-            return cached_data
-
-    # Use the clusterer's prepare_data method to ensure consistency
-    clusterer = ctx.clusterer
-    if clusterer is None:
-        raise ValueError("Clusterizador não encontrado.")
-    
-    # Prepare data using the same method as training
-    try:
-        X_scaled = clusterer.prepare_data(feature_frame)
-    except Exception as exc:
-        _CACHED_CLUSTER_PREP = None
-        raise ValueError(f"Erro ao preparar dados para clustering (modo: {clusterer.mode}): {exc}") from exc
-    
-    _CACHED_CLUSTER_PREP = (ctx_id, df_key, (ctx, feature_frame, X_scaled))
-    return ctx, feature_frame, X_scaled
+        raise ValueError(f"Erro ao preparar dados para clusterização: {exc}") from exc
 
 
-def _get_optimal_k_analysis(X_scaled: np.ndarray, mode: Literal['kmeans', 'kmodes'] = 'kmodes') -> dict:
-    """Get optimal K analysis using DiseaseClusterer methods."""
-    global _CACHED_OPTIMAL_K_RESULTS
-    
-    if _CACHED_OPTIMAL_K_RESULTS is not None:
-        return _CACHED_OPTIMAL_K_RESULTS
-    
-    # Create a temporary clusterer to use its find_optimal_clusters method
-    temp_clusterer = DiseaseClusterer(random_state=42, mode=mode)
-    
-    # Use the clusterer's method which already handles sampling efficiently
-    results = temp_clusterer.find_optimal_clusters(X_scaled, max_clusters=10, sample_size=1000)
-    
-    _CACHED_OPTIMAL_K_RESULTS = results
-    return results
+@lru_cache(maxsize=4)
+def _get_optimal_k_analysis(version_key: tuple | None, mode: Literal['kmeans', 'kmodes'] = 'kmodes') -> dict:
+    """Get optimal K analysis using DiseaseClusterer methods with caching."""
+    _, X_scaled, cached_mode = _cached_cluster_prep(version_key)
+    resolved_mode = mode or cached_mode
+
+    temp_clusterer = DiseaseClusterer(random_state=42, mode=resolved_mode)
+    return temp_clusterer.find_optimal_clusters(X_scaled, max_clusters=10, sample_size=1000)
+
+
+@lru_cache(maxsize=4)
+def _cached_pca_3d(version_key: tuple | None) -> Tuple[np.ndarray, np.ndarray]:
+    """Cache PCA 3D reduction for clustering visualization."""
+    _, X_scaled, _ = _cached_cluster_prep(version_key)
+    pca = PCA(n_components=3, random_state=42)
+    return pca.fit_transform(X_scaled), pca.explained_variance_ratio_
 
 
 def _get_hover_info(df: pd.DataFrame, indices: np.ndarray, ctx) -> list[str]:
@@ -234,6 +208,12 @@ def _create_clustering_content() -> html.Div:
     )
     
     if not clusterer_available:
+        model_status = get_model_status()
+        error_detail = model_status.get('clusterer')
+        message = 'Execute o treinamento do modelo de clusterização para usar esta aba.'
+        if error_detail:
+            message = f'{message} Detalhe: {error_detail}'
+
         return html.Div([
             page_header(
                 '🔬 Modelos ML - Clusterização',
@@ -241,34 +221,7 @@ def _create_clustering_content() -> html.Div:
                 'O modelo de clusterização não foi treinado. Execute o treinamento primeiro.'
             ),
             html.Div([
-                dbc.Alert(
-                    [
-                        html.Span('⚠️', style={'fontSize': '1.3em', 'marginRight': '12px'}),
-                        html.Div([
-                            html.Strong('Clusterizador não disponível', style={'display': 'block', 'marginBottom': '10px'}),
-                            html.P('Execute o treinamento do modelo de clusterização para usar esta aba.', style={'marginBottom': '10px'}),
-                            html.Hr(style={'borderColor': 'rgba(255, 193, 7, 0.3)', 'margin': '10px 0'}),
-                            html.P([
-                                html.Strong('Como treinar:'),
-                                html.Br(),
-                                '1. Abra o terminal no diretório raiz do projeto',
-                                html.Br(),
-                                '2. Ative o ambiente virtual: ',
-                                html.Code('.venv\\Scripts\\activate', style={'backgroundColor': 'rgba(0,0,0,0.2)', 'padding': '2px 6px', 'borderRadius': '4px'}),
-                                html.Br(),
-                                '3. Execute: ',
-                                html.Code('python scripts/train_models.py --use-kmodes', style={'backgroundColor': 'rgba(0,0,0,0.2)', 'padding': '2px 6px', 'borderRadius': '4px'})
-                            ], style={'fontSize': '0.9em', 'lineHeight': '1.8'})
-                        ], style={'display': 'inline-block'})
-                    ],
-                    color='warning',
-                    style={
-                        'backgroundColor': f'rgba(255, 193, 7, 0.15)',
-                        'borderLeft': '4px solid #FFC107',
-                        'borderRadius': '8px',
-                        'margin': '20px'
-                    }
-                )
+                alert_component('warning', 'Clusterizador não disponível', message)
             ], style={'padding': '20px'})
         ])
     
@@ -501,7 +454,8 @@ def update_cluster_elbow(tab):
         return error_figure(str(exc))
     
     # Get optimal K analysis from clusterer
-    results = _get_optimal_k_analysis(X_scaled)
+    version_key = get_context_version()
+    results = _get_optimal_k_analysis(version_key)
     
     ks = results['ks']
     inertias = results['inertias']
@@ -576,7 +530,8 @@ def update_cluster_silhouette(tab):
         return error_figure(str(exc))
     
     # Get optimal K analysis from clusterer
-    results = _get_optimal_k_analysis(X_scaled)
+    version_key = get_context_version()
+    results = _get_optimal_k_analysis(version_key)
     
     ks = results['ks']
     silhouette_scores = results['silhouette_scores']
@@ -659,7 +614,8 @@ def update_cluster_pca_3d_elbow(tab):
         return error_figure(str(exc))
     
     # Get optimal K analysis from clusterer
-    results = _get_optimal_k_analysis(X_scaled, mode='kmodes')
+    version_key = get_context_version()
+    results = _get_optimal_k_analysis(version_key, mode='kmodes')
     elbow_k = results.get('elbow_k')
     
     if elbow_k is None:
@@ -669,9 +625,8 @@ def update_cluster_pca_3d_elbow(tab):
     model = KMeans(n_clusters=elbow_k, random_state=42, n_init=10)
     labels = model.fit_predict(X_scaled)
     
-    # Perform PCA
-    pca = PCA(n_components=3, random_state=42)
-    X_pca = pca.fit_transform(X_scaled)
+    # Perform PCA (cached)
+    X_pca, explained_var = _cached_pca_3d(version_key)
     
     # Get hover information
     hover_texts = _get_hover_info(ctx.df, feature_frame.index.to_numpy(), ctx)
@@ -697,8 +652,6 @@ def update_cluster_pca_3d_elbow(tab):
             hovertemplate='%{text}<extra></extra>',
             text=[hover_texts[i] for i in cluster_indices]
         ))
-    
-    explained_var = pca.explained_variance_ratio_
     
     fig.update_layout(
         scene=dict(
@@ -748,7 +701,8 @@ def update_cluster_pca_3d_silhouette(tab):
         return error_figure(str(exc))
     
     # Get optimal K analysis from clusterer
-    results = _get_optimal_k_analysis(X_scaled, mode='kmodes')
+    version_key = get_context_version()
+    results = _get_optimal_k_analysis(version_key, mode='kmodes')
     silhouette_k = results.get('silhouette_best_k')
     
     if silhouette_k is None:
@@ -758,9 +712,8 @@ def update_cluster_pca_3d_silhouette(tab):
     model = KMeans(n_clusters=silhouette_k, random_state=42, n_init=10)
     labels = model.fit_predict(X_scaled)
     
-    # Perform PCA
-    pca = PCA(n_components=3, random_state=42)
-    X_pca = pca.fit_transform(X_scaled)
+    # Perform PCA (cached)
+    X_pca, explained_var = _cached_pca_3d(version_key)
     
     # Get hover information
     hover_texts = _get_hover_info(ctx.df, feature_frame.index.to_numpy(), ctx)
@@ -786,8 +739,6 @@ def update_cluster_pca_3d_silhouette(tab):
             hovertemplate='%{text}<extra></extra>',
             text=[hover_texts[i] for i in cluster_indices]
         ))
-    
-    explained_var = pca.explained_variance_ratio_
     
     fig.update_layout(
         scene=dict(

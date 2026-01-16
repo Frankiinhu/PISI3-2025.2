@@ -1,7 +1,7 @@
 """Classification and SHAP Explainability tab layout and callbacks."""
 from __future__ import annotations
 
-from typing import Iterable
+
 import numpy as np
 import pandas as pd
 
@@ -12,8 +12,15 @@ from plotly.subplots import make_subplots
 import dash_bootstrap_components as dbc
 
 from ..components import create_card
-from ..core.data_context import get_context, has_feature_importances, is_classifier_available
+from ..core.data_context import (
+    get_context,
+    get_context_version,
+    get_model_status,
+    has_feature_importances,
+    is_classifier_available,
+)
 from ..core.theme import COLORS, page_header
+from ..utils.ui import graph_card, graph_row, section_header, alert_component
 from ..shap_utils import (
     create_shap_feature_importance_bar,
     create_shap_multiclass_bar,
@@ -23,49 +30,21 @@ from ..shap_utils import (
 )
 
 
-def _section_header(title: str, subtitle: str | None = None, accent: str = 'accent') -> html.Div:
-    """Create section header with styling."""
-    return html.Div([
-        html.H3(
-            title,
-            style={
-                'color': COLORS['text'],
-                'marginBottom': '10px',
-                'fontSize': '1.7em',
-                'fontWeight': '700',
-                'borderLeft': f'6px solid {COLORS[accent]}',
-                'paddingLeft': '14px',
-                'background': f'linear-gradient(90deg, rgba(255,255,255,0.05) 0%, transparent 100%)',
-            },
-        ),
-        html.P(
-            subtitle,
-            style={
-                'color': COLORS['text_secondary'],
-                'fontSize': '1em',
-                'marginBottom': '24px',
-                'paddingLeft': '18px',
-            },
-        ) if subtitle else None,
-    ])
+_SHAP_FIGURE_CACHE: dict[tuple, go.Figure] = {}
 
 
-def _graph_row(cards: Iterable[html.Div]) -> html.Div:
-    """Create responsive row of graph cards."""
-    return html.Div(list(cards), style={
-        'display': 'flex',
-        'flexWrap': 'wrap',
-        'gap': '20px',
-        'marginBottom': '20px'
-    })
-
-
-def _graph_card(graph_id: str, title: str, flex: str = '1 1 360px') -> html.Div:
-    """Create a card with a graph."""
-    return html.Div(
-        create_card([dcc.Graph(id=graph_id)], title),
-        style={'flex': flex, 'minWidth': '320px'}
+def _shap_cache_key(ctx, suffix: str, sample_idx: int | None = None) -> tuple:
+    clf = ctx.classifier
+    feature_names = tuple(clf.feature_names or [])
+    return (
+        get_context_version(),
+        id(clf.shap_values),
+        id(clf.shap_data),
+        feature_names,
+        suffix,
+        sample_idx,
     )
+
 
 
 def create_layout() -> html.Div:
@@ -84,6 +63,12 @@ def _create_classification_content() -> html.Div:
     classifier_available = is_classifier_available()
     
     if not classifier_available:
+        model_status = get_model_status()
+        error_detail = model_status.get('classifier')
+        message = 'Execute o treinamento do modelo para usar esta aba.'
+        if error_detail:
+            message = f'{message} Detalhe: {error_detail}'
+
         return html.Div([
             page_header(
                 '🤖 Classificação e Explicabilidade SHAP',
@@ -91,21 +76,7 @@ def _create_classification_content() -> html.Div:
                 'O classificador não foi treinado. Execute o treinamento primeiro.'
             ),
             html.Div([
-                dbc.Alert(
-                    [
-                        html.Span('⚠️', style={'fontSize': '1.3em', 'marginRight': '12px'}),
-                        html.Div([
-                            html.Strong('Classificador não disponível', style={'display': 'block'}),
-                            html.Span('Execute o treinamento do modelo para usar esta aba.')
-                        ], style={'display': 'inline-block'})
-                    ],
-                    color='warning',
-                    style={
-                        'backgroundColor': f'rgba(255, 193, 7, 0.15)',
-                        'borderLeft': '4px solid #FFC107',
-                        'borderRadius': '8px'
-                    }
-                )
+                alert_component('warning', 'Classificador não disponível', message)
             ], style={'padding': '20px'})
         ])
     
@@ -122,7 +93,7 @@ def _create_classification_content() -> html.Div:
         ),
         
         # ===== EXPLICAÇÕES GLOBAIS =====
-        _section_header(
+        section_header(
             '📊 Explicações Globais (Model Behavior)',
             'Entenda quais features são mais importantes para o modelo em geral'
         ),
@@ -146,26 +117,26 @@ def _create_classification_content() -> html.Div:
         ], style={'marginBottom': '20px', 'paddingX': '20px'}),
         
         # Feature Importance Bar
-        _graph_row([
-            _graph_card('shap-feature-importance', 'Feature Importance (SHAP)', '1 1 100%')
+        graph_row([
+            graph_card('shap-feature-importance', 'Feature Importance (SHAP)', '1 1 100%')
         ]),
         
         # Multiclass Feature Importance (se aplicável)
         html.Div([
-            _graph_row([
-                _graph_card('shap-multiclass-bar', 'Importância por Classe (SHAP)', '1 1 100%')
+            graph_row([
+                graph_card('shap-multiclass-bar', 'Importância por Classe (SHAP)', '1 1 100%')
             ]) if len(classes) > 1 else None
         ]),
         
         # Beeswarm Plot
         html.Div([
-            _graph_row([
-                _graph_card('shap-beeswarm', 'SHAP Beeswarm Plot', '1 1 100%')
+            graph_row([
+                graph_card('shap-beeswarm', 'SHAP Beeswarm Plot', '1 1 100%')
             ])
         ]) if shap_available else None,
         
         # ===== EXPLICAÇÃO LOCAL =====
-        _section_header(
+        section_header(
             '🔍 Explicação Local (Predição Individual)',
             'Selecione uma amostra para entender a predição específica',
             'primary'
@@ -204,8 +175,8 @@ def _create_classification_content() -> html.Div:
         ], style={'padding': '20px', 'backgroundColor': COLORS['secondary'], 'borderRadius': '8px', 'marginBottom': '20px'}),
         
         # Force Plot (Explicação Local)
-        _graph_row([
-            _graph_card('shap-force-plot', 'Force Plot (Waterfall)', '1 1 100%')
+        graph_row([
+            graph_card('shap-force-plot', 'Force Plot (Waterfall)', '1 1 100%')
         ]) if shap_available else html.Div([
             dbc.Alert(
                 [
@@ -225,7 +196,7 @@ def _create_classification_content() -> html.Div:
         ]),
         
         # ===== MÉTRICAS DO MODELO =====
-        _section_header(
+        section_header(
             '📈 Métricas e Performance',
             'Avaliação do modelo treinado'
         ),
@@ -251,14 +222,20 @@ def update_shap_feature_importance(sample_idx):
             showarrow=False
         )
     
+    cache_key = _shap_cache_key(ctx, 'feature-importance')
+    if cache_key in _SHAP_FIGURE_CACHE:
+        return _SHAP_FIGURE_CACHE[cache_key]
+
     try:
-        return create_shap_feature_importance_bar(
+        fig = create_shap_feature_importance_bar(
             clf.shap_values,
             clf.feature_names,
             class_names=list(clf.label_encoder.classes_),
             top_n=15,
             title='🎯 Feature Importance - Média Absoluta |SHAP|'
         )
+        _SHAP_FIGURE_CACHE[cache_key] = fig
+        return fig
     except Exception as e:
         return go.Figure().add_annotation(
             text=f'Erro ao gerar gráfico: {str(e)}',
@@ -289,14 +266,20 @@ def update_shap_multiclass_bar(sample_idx):
             showarrow=False
         )
     
+    cache_key = _shap_cache_key(ctx, 'multiclass-bar')
+    if cache_key in _SHAP_FIGURE_CACHE:
+        return _SHAP_FIGURE_CACHE[cache_key]
+
     try:
-        return create_shap_multiclass_bar(
+        fig = create_shap_multiclass_bar(
             clf.shap_values,
             clf.feature_names,
             list(clf.label_encoder.classes_),
             top_n=10,
             title='📊 Feature Importance por Classe (SHAP)'
         )
+        _SHAP_FIGURE_CACHE[cache_key] = fig
+        return fig
     except Exception as e:
         return go.Figure().add_annotation(
             text=f'Erro ao gerar gráfico: {str(e)}',
@@ -320,10 +303,14 @@ def update_shap_beeswarm(sample_idx):
             showarrow=False
         )
     
+    cache_key = _shap_cache_key(ctx, 'beeswarm')
+    if cache_key in _SHAP_FIGURE_CACHE:
+        return _SHAP_FIGURE_CACHE[cache_key]
+
     try:
         # Mostrar apenas as 3 features climáticas + dados demográficos (Idade, Gênero)
         include = ['Temperatura (°C)', 'Umidade', 'Velocidade do Vento (km/h)', 'Idade', 'Gênero']
-        return create_shap_beeswarm(
+        fig = create_shap_beeswarm(
             clf.shap_values,
             clf.shap_data,
             clf.feature_names,
@@ -331,6 +318,8 @@ def update_shap_beeswarm(sample_idx):
             title='🐝 SHAP Beeswarm Plot - Climáticas + Demográficas',
             include_features=include
         )
+        _SHAP_FIGURE_CACHE[cache_key] = fig
+        return fig
     except Exception as e:
         return go.Figure().add_annotation(
             text=f'Erro ao gerar gráfico: {str(e)}',
@@ -359,6 +348,10 @@ def update_shap_force_plot(sample_idx):
             display_text
         )
     
+    cache_key = _shap_cache_key(ctx, 'force-plot', sample_idx)
+    if cache_key in _SHAP_FIGURE_CACHE:
+        return _SHAP_FIGURE_CACHE[cache_key], display_text
+
     try:
         # Pegar predição para a amostra
         X_sample = clf.shap_data[sample_idx:sample_idx+1]
@@ -390,6 +383,7 @@ def update_shap_force_plot(sample_idx):
         # Adicionar informações de confiança
         display_text = f'Amostra #{sample_idx} | 🎯 Predição: {predicted_class} (confiança: {confidence:.1%})'
         
+        _SHAP_FIGURE_CACHE[cache_key] = fig
         return fig, display_text
         
     except Exception as e:

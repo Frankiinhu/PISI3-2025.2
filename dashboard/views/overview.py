@@ -1,7 +1,7 @@
 """Overview tab layout and callbacks."""
 from __future__ import annotations
 
-from typing import Iterable
+
 
 from dash import Input, Output, dcc, html, callback
 import plotly.express as px
@@ -13,168 +13,8 @@ import dash_bootstrap_components as dbc
 from ..components import create_card
 from ..core.data_context import get_context
 from ..core.theme import COLORS, page_header
+from ..utils.ui import alert_component, filter_dropdown_col, kpi_card
 
-
-def _filter_dropdown(component_id: str, label: str, options: Iterable[dict], value, width: str = '25%') -> html.Div:
-    """Helper function to create filter dropdown UI with Bootstrap styling"""
-    return dbc.Col([
-        dbc.Label(label, html_for=component_id, style={
-            'color': COLORS['text'],
-            'fontWeight': '600',
-            'marginBottom': '8px',
-            'fontSize': '0.95em'
-        }),
-        dcc.Dropdown(
-            id=component_id,
-            options=list(options),
-            value=value,
-            clearable=False,
-            className='custom-dropdown',
-            style={
-                'backgroundColor': COLORS['secondary'],
-                'borderRadius': '8px',
-                'border': f'1px solid {COLORS["border"]}'
-            },
-        ),
-    ], md=6, sm=12)
-
-
-def _kpi_card(icon: str, label: str, value: str, value_color: str, subtitle: str = '', gradient: str = 'gradient_primary') -> html.Div:
-    """Enhanced KPI card with gradient and modern effects"""
-    gradient_map = {
-        'gradient_primary': COLORS.get('gradient_primary', 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'),
-        'gradient_success': COLORS.get('gradient_success', 'linear-gradient(135deg, #4ade80 0%, #22c55e 100%)'),
-        'gradient_warning': COLORS.get('gradient_warning', 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)'),
-        'gradient_error': COLORS.get('gradient_error', 'linear-gradient(135deg, #f87171 0%, #ef4444 100%)'),
-        'gradient_teal': COLORS.get('gradient_teal', 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)'),
-        'gradient_blue': COLORS.get('gradient_blue', 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'),
-    }
-    
-    selected_gradient = gradient_map.get(gradient, gradient_map['gradient_primary'])
-    
-    return dbc.Col([
-        html.Div([
-            # Barra de gradiente no topo
-            html.Div(style={
-                'position': 'absolute',
-                'top': '0',
-                'left': '0',
-                'right': '0',
-                'height': '4px',
-                'width': '100%',
-                'background': selected_gradient,
-                'borderRadius': '12px 12px 0 0',
-            }),
-            
-            # Ícone com efeito de glow
-            html.Div([
-                html.Div(icon, style={
-                    'fontSize': '3em',
-                    'marginBottom': '12px',
-                    'textAlign': 'center',
-                    'filter': 'drop-shadow(0 0 10px rgba(102, 126, 234, 0.4))',
-                    'transition': 'all 0.3s ease',
-                })
-            ], style={
-                'background': f'rgba(102, 126, 234, 0.1)',
-                'padding': '12px',
-                'borderRadius': '12px',
-                'marginBottom': '12px',
-                'backdropFilter': 'blur(10px)',
-            }),
-            
-            # Label
-            html.H6(label, style={
-                'color': COLORS['text_secondary'],
-                'margin': '0',
-                'fontSize': '0.8em',
-                'fontWeight': '600',
-                'textTransform': 'uppercase',
-                'letterSpacing': '1px',
-                'textAlign': 'center'
-            }),
-            
-            # Valor principal
-            html.H3(value, style={
-                'background': selected_gradient,
-                '-webkit-background-clip': 'text',
-                '-webkit-text-fill-color': 'transparent',
-                'backgroundClip': 'text',
-                'margin': '12px 0 0 0',
-                'fontSize': '2.2em',
-                'fontWeight': '800',
-                'textAlign': 'center',
-                'letterSpacing': '-0.5px',
-            }),
-            
-            # Subtítulo
-            html.P(subtitle, style={
-                'color': COLORS['text_secondary'],
-                'margin': '8px 0 0 0',
-                'fontSize': '0.75em',
-                'textAlign': 'center',
-                'fontWeight': '500',
-                'opacity': '0.8'
-            }) if subtitle else None,
-        ], style={
-            'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
-            'padding': '28px 20px',
-            'borderRadius': '12px',
-            'textAlign': 'center',
-            'boxShadow': '0 12px 40px rgba(0,0,0,0.3)',
-            'border': f'1px solid {COLORS["border"]}',
-            'transition': 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-            'height': '100%',
-            'position': 'relative',
-            'overflow': 'hidden',
-        }, className='stat-card')
-    ], md=6, lg=2, sm=6, xs=12, style={'marginBottom': '20px'})
-
-
-def _alert_component(alert_type: str, title: str, message: str) -> dbc.Alert:
-    """Create responsive alert components"""
-    alert_colors = {
-        'warning': COLORS['warning'],
-        'danger': COLORS['error'],
-        'success': COLORS['success'],
-        'info': COLORS['accent']
-    }
-    
-    icons = {
-        'warning': '⚠️',
-        'danger': '❌',
-        'success': '✅',
-        'info': 'ℹ️'
-    }
-    
-    return dbc.Alert([
-        html.Div([
-            html.Span(icons.get(alert_type, 'ℹ️'), style={
-                'fontSize': '1.3em',
-                'marginRight': '12px',
-                'display': 'inline-block'
-            }),
-            html.Div([
-                html.Strong(title, style={'display': 'block', 'marginBottom': '4px'}),
-                html.Span(message, style={'fontSize': '0.95em'})
-            ], style={'display': 'inline-block', 'verticalAlign': 'top'})
-        ])
-    ], color=alert_type, style={
-        'backgroundColor': f'rgba({hex_to_rgb(alert_colors[alert_type])}, 0.15)',
-        'borderLeft': f'4px solid {alert_colors[alert_type]}',
-        'borderRadius': '8px',
-        'padding': '16px',
-        'marginBottom': '16px',
-        'borderTop': 'none',
-        'borderRight': 'none',
-        'borderBottom': 'none'
-    }, className='alert-custom')
-
-
-def hex_to_rgb(hex_color):
-    """Convert hex color to RGB tuple"""
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
 
 def create_layout() -> html.Div:
@@ -198,19 +38,17 @@ def _create_overview_content() -> html.Div:
         metrics = getattr(ctx.classifier, 'metrics', None)
         accuracy_text = f"{metrics.get('balanced_accuracy', 0)*100:.1f}%" if metrics else 'N/A'
         model_status = '✅ Treinado'
-        model_color = COLORS['success']
     else:
         accuracy_text = 'N/A'
         model_status = '⚠️ Não Treinado'
-        model_color = COLORS['warning']
 
     # KPIs principais
     kpis_row = dbc.Row([
-        _kpi_card('📊', 'Total de Casos', f"{info['shape'][0]:,}", COLORS['accent'], 'Registros no dataset', 'gradient_blue'),
-        _kpi_card('📈', 'Idade Média', f"{ctx.df['Idade'].mean():.1f} anos", COLORS['primary'], f"Min: {ctx.df['Idade'].min()}, Max: {ctx.df['Idade'].max()}", 'gradient_primary'),
-        _kpi_card('👥', 'Distribuição', f"{ctx.df['Gênero'].value_counts().iloc[0]:,}", COLORS['success'], 'Maior grupo', 'gradient_success'),
-        _kpi_card('🏥', 'Diagnósticos', str(ctx.df[diagnosis_col].nunique()), COLORS['warning'], f'Tipos únicos', 'gradient_warning'),
-        _kpi_card('🤖', 'Modelo ML', model_status, model_color, f'Acurácia: {accuracy_text}', 'gradient_teal'),
+        kpi_card('📊', 'Total de Casos', f"{info['shape'][0]:,}", 'Registros no dataset', 'gradient_blue'),
+        kpi_card('📈', 'Idade Média', f"{ctx.df['Idade'].mean():.1f} anos", f"Min: {ctx.df['Idade'].min()}, Max: {ctx.df['Idade'].max()}", 'gradient_primary'),
+        kpi_card('👥', 'Distribuição', f"{ctx.df['Gênero'].value_counts().iloc[0]:,}", 'Maior grupo', 'gradient_success'),
+        kpi_card('🏥', 'Diagnósticos', str(ctx.df[diagnosis_col].nunique()), 'Tipos únicos', 'gradient_warning'),
+        kpi_card('🤖', 'Modelo ML', model_status, f'Acurácia: {accuracy_text}', 'gradient_teal'),
     ], style={'marginBottom': '30px'})
 
     # Header
@@ -248,8 +86,8 @@ def _create_overview_content() -> html.Div:
             'fontSize': '0.95em'
         }),
         dbc.Row([
-            _filter_dropdown('overview-gender-filter', '👤 Gênero', gender_filter_options, 'todos'),
-            _filter_dropdown('overview-age-filter', '🎂 Faixa Etária', age_filter_options, 'todos'),
+            filter_dropdown_col('overview-gender-filter', '👤 Gênero', gender_filter_options, 'todos'),
+            filter_dropdown_col('overview-age-filter', '🎂 Faixa Etária', age_filter_options, 'todos'),
         ], style={
             'padding': '20px',
             'background': f'linear-gradient(135deg, {COLORS["card"]} 0%, {COLORS["card_hover"]} 100%)',
@@ -348,7 +186,7 @@ def register_callbacks(app) -> None:
         
         # Alerta 1: Dados insuficientes
         if len(df_filtered) < 50:
-            alerts.append(_alert_component(
+            alerts.append(alert_component(
                 'warning',
                 'Dados Insuficientes',
                 f'Apenas {len(df_filtered)} registros encontrados. Considere ajustar os filtros para análises mais robustas.'
@@ -361,7 +199,7 @@ def register_callbacks(app) -> None:
             if len(diag_counts) > 0:
                 max_prop = diag_counts.iloc[0] / len(df_filtered)
                 if max_prop > 0.7:
-                    alerts.append(_alert_component(
+                    alerts.append(alert_component(
                         'warning',
                         'Classe Desbalanceada',
                         f'Classe "{diag_counts.index[0]}" representa {max_prop*100:.1f}% dos dados. Modelos podem ser enviesados.'
@@ -372,7 +210,7 @@ def register_callbacks(app) -> None:
         if len(gender_counts) == 2:
             gender_ratio = gender_counts.iloc[0] / gender_counts.iloc[1]
             if gender_ratio > 3 or gender_ratio < 0.33:
-                alerts.append(_alert_component(
+                alerts.append(alert_component(
                     'info',
                     'Gênero Desigualmente Distribuído',
                     f'Razão de gênero é {gender_ratio:.1f}:1. Possível enviesamento nos dados.'
@@ -380,7 +218,7 @@ def register_callbacks(app) -> None:
         
         # Alerta 4: Dados completos
         if len(df_filtered) > 0 and len(alerts) == 0:
-            alerts.append(_alert_component(
+            alerts.append(alert_component(
                 'success',
                 'Dados Balanceados',
                 f'{len(df_filtered)} registros com distribuição adequada para análise.'
